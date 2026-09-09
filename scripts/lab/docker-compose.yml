@@ -1,0 +1,81 @@
+# PivotHub Docker 靶场
+#
+# ⚠ 合规：仅用于 CTF 竞赛 / 授权靶场 / 教学演示，禁止对任何未授权目标使用。
+# 全部服务仅绑定 127.0.0.1；三个场景对应 PRD 的三类典型出网环境。
+#
+# 使用：
+#   docker compose up -d                    # 启动全部场景（或用 --scale / profile 选择）
+#   docker compose ps                       # 查看状态
+#
+# 场景 1（reverse-tcp）：DMZ Linux，可任意出网（反向 TCP 可达宿主）
+#   面板登记 Shell → URL: http://127.0.0.1:8801/shell.php   密码: pivothub
+#   目标内置：python3 / script / socat / nc（终端固化技法全部可用）
+#
+# 场景 2（http-only）：仅 HTTP 可达（internal 网络，无出网路由）
+#   面板登记 Shell → URL: http://127.0.0.1:8802/shell.php   密码: pivothub
+#   用于 Neo-reGeorg（MS3）HTTP 隧道场景联调
+#
+# 场景 3（multi-nic）：双网卡多级串联（l2 网可达 l3 网）
+#   L2: http://127.0.0.1:8803/shell.php   密码: pivothub
+#   L3（仅 L2 网内可达，演示纵深）: http://l3-core:80/shell.php
+#   从 L2 节点起第二层代理即可打到 L3 网（MS4 多级串联）
+
+services:
+  # ---------- 场景 1：可反向 TCP 出网 ----------
+  web-dmz:
+    build:
+      context: ./files
+      dockerfile: Dockerfile.linux
+    container_name: pivothub-lab-webdmz
+    ports:
+      - "127.0.0.1:8801:80"
+    environment:
+      - PIVOTHUB_LAB=reverse-tcp
+    restart: unless-stopped
+
+  # ---------- 场景 2：仅 HTTP 出网（internal 网络） ----------
+  http-only:
+    build:
+      context: ./files
+      dockerfile: Dockerfile.linux
+    container_name: pivothub-lab-httponly
+    ports:
+      - "127.0.0.1:8802:80"
+    environment:
+      - PIVOTHUB_LAB=http-only
+    networks:
+      - isolated
+    # internal 网络无默认出网路由：模拟“仅 HTTP 可达”的 DMZ
+    restart: unless-stopped
+
+  # ---------- 场景 3：双网卡多级串联 ----------
+  l2-jump:
+    build:
+      context: ./files
+      dockerfile: Dockerfile.linux
+    container_name: pivothub-lab-l2
+    ports:
+      - "127.0.0.1:8803:80"
+    environment:
+      - PIVOTHUB_LAB=multi-nic-l2
+    networks:
+      - isolated
+      - deep
+    restart: unless-stopped
+
+  l3-core:
+    build:
+      context: ./files
+      dockerfile: Dockerfile.linux
+    container_name: pivothub-lab-l3
+    environment:
+      - PIVOTHUB_LAB=multi-nic-l3
+    networks:
+      - deep
+    restart: unless-stopped
+
+networks:
+  isolated:
+    internal: true
+  deep:
+    internal: true

@@ -1,0 +1,297 @@
+"""终端固化服务（PRD M1-8，P0）。
+
+全部判定基于真实回显：
+- 交互能力检测：真实执行 `tty` / `echo $TERM` / `stty size` / `which` 工具探测并解析输出；
+- PTY 判定：在目标侧真实拉起 PTY（python pty.spawn / script），在其内执行
+  `tty; echo $TERM; stty size`，依据回显（/dev/pts/*、TERM≠dumb、rows cols）判定；
+- 技法库：data/tty_fixes/*.json 插件，不在代码里写死；
+- 收尾：真实执行 `stty sane` + `stty rows/cols`（窗口尺寸同步）并回读 `stty size` 验证。
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import Optional
+
+from ..session.base import ExecResult, SessionBase, SessionError
+
+PTS_RE = re.compile(r"/dev/(pts/\d+|tty\w+|ttys\d+|console)")
+NOT_A_TTY = "not a tty"
+SIZE_RE = re.compile(r"(\d{1,4})\s+(\d{1,4})")
+
+# 可真正建立 PTY 的技法 id（data/tty_fixes 插件中的 platform 语义标记）
+PTY_TECHNIQUES = {"lx-python", "lx-python-alt", "lx-script", "lx-socat", "lx-nc-fifo"}
+# 反向通道技法：需要攻击端监听，MS3 与回连监听一起启用
+REVERSE_TECHNIQUES = {"lx-socat", "lx-nc-fifo", "win-ps"}
+
+
+@dataclass
+class TtyCaps:
+    has_tty: bool = False
+    term: str = ""
+    shell: str = ""
+    stty_size: Optional[tuple[int, int]] = None
+    python: bool = False
+    script: bool = False
+    socat: bool = False
+    nc: bool = False
+    powershell: bool = False
+    os: str = "linux"
+
+    def to_dict(self) -> dict:
+        return {
+            "tty": self.has_tty, "term": self.term, "shell": self.shell,
+            "python": self.python, "script": self.script, "socat": self.socat,
+            "nc": self.nc, "powershell": self.powershell, "os": self.os,
+            "sttySize": list(self.stty_size) if self.stty_size else None,
+        }
+
+
+# ---------------- 纯解析函数（可单测，输入=真实回显样本） ----------------
+
+def parse_tty_output(output: str) -> bool:
+    """`tty` 真实回显 → 是否有控制终端。"""
+    if NOT_A_TTY in output.lower():
+        return False
+    return bool(PTS_RE.search(output))
+
+
+def parse_term_output(output: str) -> str:
+    """`echo $TERM` 真实回显 → TERM 值（去引号/空白）。"""
+    t = output.strip().strip('"').strip("'")
+    return t if t and "=" not in t else (t.split("=")[-1] if "=" in t else "")
+
+
+def parse_stty_size(output: str) -> Optional[tuple[int, int]]:
+    """`stty size` 真实回显 → (rows, cols)；失败返回 None。"""
+    m = SIZE_RE.search(output)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def parse_which_output(output: str) -> list[str]:
+    """`which python3 python script socat nc` 回显 → 可用工具名列表。"""
+    tools = []
+    for line in output.splitlines():
+        p = line.strip()
+        if not p or " " in p and not p.startswith("/"):
+            continue
+        if "/" in p:
+            tools.append(p.rsplit("/", 1)[-1])
+    return tools
+
+
+def judge_mode(has_tty: bool, term: str, stty_size: Optional[tuple], platform: str) -> str:
+    """终端形态三态判定（真实依据：PTY / TERM / 窗口尺寸）。"""
+    if platform == "windows":
+        return "dumb"  # Windows cmd 无真实 TTY 概念（ConPTY 后续接入）
+    if has_tty and term and term.lower() != "dumb":
+        return "full"
+    if has_tty:
+        return "semi"
+    return "dumb"
+
+
+# ---------------- 交互能力检测（真实探测） ----------------
+
+LINUX_PROBES = [
+    ("tty", "tty"),
+    ("term", "echo $TERM"),
+    ("stty", "stty size"),
+    ("shell", "echo $0"),
+    ("tools", "which python3 python script socat nc 2>/dev/null"),
+]
+WINDOWS_PROBES = [
+    ("comspec", "echo %COMSPEC%"),
+    ("ps", "where powershell"),
+    ("ver", "ver"),
+]
+
+
+def detect(session: SessionBase) -> dict:
+    """真实交互能力检测。返回与前端契约一致的结论。"""
+    platform = session.platform
+    probes = WINDOWS_PROBES if platform == "windows" else LINUX_PROBES
+    outputs: dict[str, str] = {}
+    probe_lines: list[dict] = []
+    for key, cmd in probes:
+        probe_lines.append({"kind": "in", "text": cmd})
+        try:
+            res: ExecResult = session.exec(cmd)
+            out = res.output or (res.error and f"[!] {res.error}") or ""
+            if not res.ok and res.error and not res.output:
+                out = res.error
+        except SessionError as e:
+            out = f"[!] {e}"
+        outputs[key] = out or ""
+        warn = bool(out) and (
+            (NOT_A_TTY in out.lower())
+            or ("dumb" in out.lower())
+            or ("Inappropriate ioctl" in out)
+            or (key == "stty" and not parse_stty_size(out))
+        )
+        probe_lines.append({"kind": "warn" if warn else "out", "text": out})
+
+    caps = TtyCaps(os=platform)
+    if platform == "windows":
+        caps.powershell = "powershell" in (outputs.get("ps", "") or "").lower()
+        caps.shell = (outputs.get("comspec", "") or "").strip() or "cmd.exe"
+        mode = "dumb"
+        tools_txt = "powershell 可用" if caps.powershell else "无"
+        summary = f"Windows 主机 · cmd/powershell 探测完成 · 无真实 TTY（ConPTY 后续接入）"
+    else:
+        caps.has_tty = parse_tty_output(outputs.get("tty", ""))
+        caps.term = parse_term_output(outputs.get("term", ""))
+        caps.stty_size = parse_stty_size(outputs.get("stty", ""))
+        caps.shell = (outputs.get("shell", "") or "").strip() or "/bin/sh"
+        for tool in parse_which_output(outputs.get("tools", "")):
+            if tool in ("python3", "python", "script", "socat", "nc"):
+                setattr(caps, "python" if tool.startswith("python") else tool, True)
+        mode = judge_mode(caps.has_tty, caps.term, caps.stty_size, platform)
+        parts = []
+        if not caps.has_tty:
+            parts.append("无 TTY（tty = not a tty）")
+        if not caps.term or caps.term.lower() == "dumb":
+            parts.append("TERM=dumb")
+        if not caps.stty_size:
+            parts.append("stty size 不可用")
+        summary = ("检测结论：" + (" · ".join(parts) if parts else "已具备交互终端要素")
+                   + " · 可用工具：" + (
+                       "/".join([n for n, ok in [
+                           ("python3", caps.python), ("script", caps.script),
+                           ("socat", caps.socat), ("nc", caps.nc)] if ok]) or "无"))
+        tools_txt = ""
+
+    return {
+        "caps": caps.to_dict(),
+        "mode": mode,
+        "probeLines": probe_lines,
+        "summary": summary,
+        "toolsTxt": tools_txt,
+    }
+
+
+# ---------------- PTY 验证（固化判定的核心） ----------------
+
+PTY_VERIFY_INNER = 'tty; echo "TERM=$TERM"; stty size; id'
+
+
+def parse_pty_verify(output: str) -> dict:
+    """从 PTY 内 `tty; echo TERM; stty size; id` 的真实回显判定是否拿到 PTY。"""
+    has_tty = parse_tty_output(output)
+    term = ""
+    m = re.search(r'TERM=(.*)', output)
+    if m:
+        term = m.group(1).strip()
+    size = parse_stty_size(output)
+    uid_line = next((ln for ln in output.splitlines() if ln.startswith("uid=")), "")
+    has_pty = has_tty and bool(term) and term.lower() != "dumb" and size is not None
+    return {
+        "hasPty": has_pty,
+        "tty": (PTS_RE.search(output).group(0) if PTS_RE.search(output) else ""),
+        "term": term,
+        "sttySize": list(size) if size else None,
+        "uid": uid_line,
+        "raw": output,
+    }
+
+
+# ---------------- 技法执行 / 收尾 ----------------
+
+def technique_kind(fix: dict) -> str:
+    fid = fix.get("id", "")
+    if fid in REVERSE_TECHNIQUES:
+        return "reverse"
+    if fid in PTY_TECHNIQUES:
+        return "pty"
+    if fix.get("manual"):
+        return "manual"
+    return "inline"
+
+
+def upgrade(session: SessionBase, fix: dict, lhost: str = "127.0.0.1", lport: int = 4444) -> dict:
+    """执行固化技法并依据真实回显判定 PTY。
+
+    - pty 类（python/script）：在目标侧真实拉起 PTY 并在其内执行验证命令；
+      判定依据 = PTY 内 `tty` 输出 pts、TERM≠dumb、`stty size` 返回行列。
+    - inline 类（env 修正 / reset / cmd 加固）：真实执行 + 回显确认。
+    - reverse 类（socat/nc/PowerShell 反向）：需攻击端监听，随 MS3 回连监听启用。
+    """
+    kind = technique_kind(fix)
+    fid = fix.get("id")
+
+    if kind == "reverse":
+        return {
+            "pivothubFallback": False, "hasPty": False,
+            "reason": f"技法「{fix.get('name')}」需要攻击端监听回连，将随 MS3 回连监听一起启用",
+            "summary": "反向通道技法待 MS3 回连监听",
+        }
+
+    if kind == "pty":
+        if not session.supports_pty_probe:
+            return {
+                "hasPty": False,
+                "reason": "该会话驱动不支持 PTY 拉起（平台限制）",
+                "summary": "目标平台无法拉起 PTY",
+            }
+        res = session.pty_probe(PTY_VERIFY_INNER)
+        verdict = parse_pty_verify(res.output or "")
+        verdict["execOk"] = res.ok
+        if not verdict["hasPty"]:
+            verdict["reason"] = res.error or "PTY 内验证未通过（缺 pts / TERM=dumb / stty 不可用）"
+        return verdict
+
+    # inline：真实执行技法命令
+    cmd = fix.get("cmd", "")
+    # 注释行剔除，变量替换（$LHOST/$LPORT 供反向技法使用）
+    lines = [ln for ln in cmd.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+    exec_cmd = "; ".join(x.strip() for x in lines) or cmd
+    exec_cmd = exec_cmd.replace("$LHOST", lhost).replace("$LPORT", str(lport))
+    res = session.exec(exec_cmd)
+    out: dict = {"hasPty": False, "execOk": res.ok, "raw": res.output, "error": res.error}
+    if res.ok and fid == "lx-env":
+        # env 修正后真实回读 TERM 验证
+        chk = session.exec('echo "TERM=$TERM"')
+        m = re.search(r"TERM=(\S+)", chk.output or "")
+        out["term"] = m.group(1) if m else ""
+        out["summary"] = f"TERM 已设为 {out['term']}" if m else "env 已更新（TERM 读取失败）"
+    elif res.ok:
+        out["summary"] = f"技法「{fix.get('name')}」已执行" + (f"：{res.output.strip()[:80]}" if res.output.strip() else "")
+    else:
+        out["reason"] = res.error or "执行失败"
+    return out
+
+
+def finish(session: SessionBase, rows: int = 40, cols: int = 120) -> dict:
+    """收尾：真实执行 stty sane + 行列同步 + TERM 修正，并回读验证。
+
+    说明：`stty raw -echo` 用于攻击端本地终端（反向通道场景，MS3 随回连监听处理）；
+    面板会话的收尾在目标 PTY 内执行 sane + rows/cols，保证 vim/top 渲染与窗口同步。
+    """
+    inner = (
+        f'stty sane 2>/dev/null; stty rows {rows} cols {cols} 2>/dev/null; '
+        'stty size; echo "TERM=$TERM"'
+    )
+    try:
+        if session.supports_pty_probe:
+            res = session.pty_probe(inner)
+        else:
+            res = session.exec(inner)
+    except SessionError as e:
+        return {"ok": False, "reason": str(e)}
+    size = parse_stty_size(res.output or "")
+    m = re.search(r"TERM=(\S+)", res.output or "")
+    return {
+        "ok": res.ok and size is not None,
+        "rows": size[0] if size else None,
+        "cols": size[1] if size else None,
+        "term": m.group(1) if m else "",
+        "output": res.output,
+        "summary": (
+            f"stty sane 已生效 · 窗口尺寸同步 rows={size[0]} cols={size[1]}"
+            + (f" · TERM={m.group(1)}" if m else "")
+            if size else "收尾命令已执行，但未能回读 stty size（目标可能无 PTY）"
+        ),
+    }

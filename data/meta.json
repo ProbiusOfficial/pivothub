@@ -1,0 +1,177 @@
+{
+  "attack": {
+    "ip": "192.0.2.10",
+    "segment": "192.0.2.0/24",
+    "iface": "tun0",
+    "note": "攻击端通过 VPN 接入靶场网络；靶机需回连到该地址，而不是 127.0.0.1"
+  },
+  "segmentColors": [
+    {
+      "segment": "192.0.2.0/24",
+      "color": "#00e5a0",
+      "layer": "VPN",
+      "count": 1
+    },
+    {
+      "segment": "192.168.100.0/24",
+      "color": "#3ba7ff",
+      "layer": "L1",
+      "count": 3
+    },
+    {
+      "segment": "10.85.101.0/24",
+      "color": "#a97bff",
+      "layer": "L2",
+      "count": 3
+    },
+    {
+      "segment": "172.56.102.0/24",
+      "color": "#ff8a3d",
+      "layer": "L3",
+      "count": 3
+    }
+  ],
+  "probes": [
+    {
+      "key": "ICMP",
+      "state": "idle",
+      "progress": 0,
+      "ms": 0,
+      "expect": "fail"
+    },
+    {
+      "key": "DNS",
+      "state": "idle",
+      "progress": 0,
+      "ms": 0,
+      "expect": "ok"
+    },
+    {
+      "key": "HTTP",
+      "state": "idle",
+      "progress": 0,
+      "ms": 0,
+      "expect": "ok"
+    },
+    {
+      "key": "TCP",
+      "state": "idle",
+      "progress": 0,
+      "ms": 0,
+      "expect": "ok"
+    }
+  ],
+  "tools": [
+    {
+      "name": "frp",
+      "note": "反向 TCP，稳定首选",
+      "supports": [
+        "反向",
+        "正向"
+      ],
+      "type": "Socks5",
+      "status": "offline"
+    },
+    {
+      "name": "nps",
+      "note": "带 Web 管理的反向隧道",
+      "supports": [
+        "反向"
+      ],
+      "type": "Socks5",
+      "status": "offline"
+    },
+    {
+      "name": "Neo-reGeorg",
+      "note": "仅 HTTP 出网时的最优解",
+      "supports": [
+        "反向"
+      ],
+      "type": "HTTP 隧道",
+      "status": "offline"
+    },
+    {
+      "name": "EW",
+      "note": "经典 lcx 式端口转发",
+      "supports": [
+        "正向",
+        "反向"
+      ],
+      "type": "端口转发",
+      "status": "offline"
+    },
+    {
+      "name": "Stowaway",
+      "note": "多级节点管理，自带拓扑",
+      "supports": [
+        "反向"
+      ],
+      "type": "Socks5",
+      "status": "offline"
+    },
+    {
+      "name": "Venom",
+      "note": "多级穿透 + 内网拓扑",
+      "supports": [
+        "反向"
+      ],
+      "type": "Socks5",
+      "status": "offline"
+    },
+    {
+      "name": "chisel",
+      "note": "单文件、易上传、HTTP 承载",
+      "supports": [
+        "反向",
+        "正向"
+      ],
+      "type": "Socks5",
+      "status": "online"
+    },
+    {
+      "name": "ligolo-ng",
+      "note": "TUN 模式，无 Socks 开销",
+      "supports": [
+        "反向"
+      ],
+      "type": "TUN",
+      "status": "offline"
+    }
+  ],
+  "shellTypes": [
+    "PHP 一句话马",
+    "PHP 自定义马",
+    "JSP 一句话马",
+    "JSP 自定义马",
+    "ASP 一句话马",
+    "ASPX 一句话马",
+    "ASPX 自定义马"
+  ],
+  "encoders": [
+    "none",
+    "base64",
+    "AES-128",
+    "AES-256",
+    "ROT13"
+  ],
+  "credKinds": [
+    "密码",
+    "NTLM 哈希",
+    "Kerberos 票据",
+    "SSH 私钥",
+    "Cookie / Token"
+  ],
+  "layers": [
+    "LOCAL",
+    "L1",
+    "L2",
+    "L3"
+  ],
+  "stageNames": [
+    "L1 入口",
+    "L2 内网",
+    "L3 域",
+    "域控"
+  ],
+  "scanSample": "10.85.101.5\t8080,22\n10.85.101.6\t80,445,3389\n10.85.101.30\t445,3389"
+}

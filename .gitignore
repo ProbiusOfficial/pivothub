@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 测试缓存
+.pytest_cache/
+
+# 运行时数据库（由 data/seed_project.json 初始化，不入库）
+*.db
+*.db-shm
+*.db-wal
+
+# 本地环境变量
+.env
+.env.local
+
+# 工作副本 / 审计快照 / 打包产物（非项目源码）
+_work/
+_audit/
+_pkg/
+other/
+%TEMP%/
+*.7z
+pivothub-frontend-baseline-*.zip
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

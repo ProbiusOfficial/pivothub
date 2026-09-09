@@ -1,0 +1,442 @@
+"""反弹 Shell 通道 API：监听 → 回连 → 登记（真实 socket 回连）。"""
+
+from __future__ import annotations
+
+import socket
+import threading
+import time
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+def _echo_client(port: int, ready: threading.Event) -> None:
+    """模拟靶机回连：原样回显收到的数据（PTY 行为），哨兵标记因此出现在回显里。"""
+    conn = None
+    for _ in range(50):
+        try:
+            conn = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+            break
+        except OSError:
+            time.sleep(0.1)
+    ready.set()
+    if conn is None:
+        return
+    try:
+        conn.settimeout(0.5)
+        while True:
+            try:
+                data = conn.recv(4096)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            if not data:
+                break
+            conn.sendall(data)
+    finally:
+        conn.close()
+
+
+def _scan_client(port: int, ready: threading.Event) -> None:
+    """模拟靶机回连：普通命令回两行扫描结果，echo 命令原样回显（哨兵同步用）。"""
+    conn = None
+    for _ in range(50):
+        try:
+            conn = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+            break
+        except OSError:
+            time.sleep(0.1)
+    ready.set()
+    if conn is None:
+        return
+    try:
+        conn.settimeout(0.5)
+        buf = b""
+        while True:
+            try:
+                data = conn.recv(4096)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            if not data:
+                break
+            buf += data
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                text = line.decode("utf-8", "replace").strip()
+                if not text:
+                    continue
+                if text.startswith("echo "):
+                    conn.sendall((text[5:] + "\n").encode())
+                else:
+                    conn.sendall(b"open 22\nopen 80\n")
+    finally:
+        conn.close()
+
+
+def test_netinfo_returns_local_ipv4(client):
+    r = client.get("/api/netinfo")
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data.get("hostname"), str)
+    assert isinstance(data.get("ips"), list)
+    assert all(not ip.startswith("127.") for ip in data["ips"])
+
+
+def test_reverse_listen_connect_register(client, sandbox_project):
+    port = _free_port()
+    r = client.post("/api/shells/reverse/listen",
+                    json={"bind": "127.0.0.1", "port": port, "label": "pytest", "waitS": 0})
+    assert r.status_code == 200
+    out = r.json()
+    assert out["ok"] is True
+    lid = out["listener"]["id"]
+    assert out["listener"]["connected"] is False
+    assert "dev/tcp" in out["payload"]  # 兼容旧契约：返回 bash 载荷
+
+    ready = threading.Event()
+    threading.Thread(target=_echo_client, args=(port, ready), daemon=True).start()
+    assert ready.wait(3), "回连客户端未启动"
+
+    deadline = time.time() + 5
+    connected = False
+    while time.time() < deadline:
+        ls = client.get("/api/shells/reverse/listeners").json()["listeners"]
+        me = next((x for x in ls if x["id"] == lid), None)
+        if me and me["connected"]:
+            connected = True
+            break
+        time.sleep(0.2)
+    assert connected, "监听器未记录回连"
+
+    host = client.get(f"/api/projects/{sandbox_project}/state").json()["hosts"][0]["id"]
+    r = client.post("/api/shells/reverse/register", json={
+        "projectId": sandbox_project, "listenerId": lid, "hostId": host,
+        "type": "反弹 Shell（pytest）", "autoCollect": False})
+    assert r.status_code == 200
+    reg = r.json()
+    assert reg["ok"] is True
+    sh = reg["shell"]
+    assert sh["kind"] == "reverse"
+    assert sh["url"].startswith("reverse://127.0.0.1:")
+    assert sh["alive"] is True  # 哨兵回显 → 真实探活成功
+
+    st = client.get(f"/api/projects/{sandbox_project}/state").json()
+    assert any(s["id"] == sh["id"] and s["kind"] == "reverse" for s in st["shells"])
+    assert any(e["kind"] == "shell" and "回连成功" in e["title"] for e in st["timeline"])
+
+
+def test_reverse_register_without_callback_fails_honestly(client, sandbox_project):
+    port = _free_port()
+    lid = client.post("/api/shells/reverse/listen",
+                      json={"bind": "127.0.0.1", "port": port, "waitS": 0}).json()["listener"]["id"]
+    host = client.get(f"/api/projects/{sandbox_project}/state").json()["hosts"][0]["id"]
+    r = client.post("/api/shells/reverse/register", json={
+        "projectId": sandbox_project, "listenerId": lid, "hostId": host})
+    body = r.json()
+    assert body["ok"] is False and body["stage"] == "callback"
+
+
+def test_reverse_listen_bad_bind_fails_honestly(client):
+    r = client.post("/api/shells/reverse/listen",
+                    json={"bind": "203.0.113.9", "port": _free_port(), "waitS": 0})
+    body = r.json()
+    assert body["ok"] is False and body["stage"] == "bind"
+    assert "本机当前没有地址" in body["error"]
+    assert isinstance(body["localIps"], list)
+
+
+def test_reverse_listen_replaces_stale_pending_listener(client):
+    """休眠 / 断线后残留的「未回连」监听会占住端口：重开同端口应自动替换而不是报错。"""
+    port = _free_port()
+    first = client.post("/api/shells/reverse/listen",
+                        json={"bind": "127.0.0.1", "port": port, "waitS": 0}).json()
+    assert first["ok"] is True and first["replaced"] is False
+    second = client.post("/api/shells/reverse/listen",
+                         json={"bind": "127.0.0.1", "port": port, "waitS": 0}).json()
+    assert second["ok"] is True and second["replaced"] is True
+    ids = [x["id"] for x in client.get("/api/shells/reverse/listeners").json()["listeners"]]
+    assert second["listener"]["id"] in ids
+    assert first["listener"]["id"] not in ids
+    assert client.delete(f"/api/shells/reverse/listeners/{second['listener']['id']}").json()["ok"] is True
+
+
+def test_reverse_listen_refuses_to_replace_connected_listener(client):
+    port = _free_port()
+    first = client.post("/api/shells/reverse/listen",
+                        json={"bind": "127.0.0.1", "port": port, "waitS": 0}).json()
+    ready = threading.Event()
+    threading.Thread(target=_echo_client, args=(port, ready), daemon=True).start()
+    assert ready.wait(3)
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        me = next((x for x in client.get("/api/shells/reverse/listeners").json()["listeners"]
+                   if x["id"] == first["listener"]["id"]), None)
+        if me and me["connected"]:
+            break
+        time.sleep(0.2)
+    r = client.post("/api/shells/reverse/listen",
+                    json={"bind": "127.0.0.1", "port": port, "waitS": 0}).json()
+    assert r["ok"] is False and "已有回连会话" in r["error"]
+    assert client.delete("/api/shells/reverse/listeners").json()["closed"] >= 1
+
+
+def test_reverse_exec_stream_yields_lines_before_marker(client, sandbox_project):
+    """流式执行：输出行在哨兵标记之前就回调（扫描日志实时进终端的关键）。"""
+    from pivothub.api.shells import REVERSE_CHANNELS
+
+    port = _free_port()
+    lid = client.post("/api/shells/reverse/listen",
+                      json={"bind": "127.0.0.1", "port": port, "waitS": 0}).json()["listener"]["id"]
+    ready = threading.Event()
+    threading.Thread(target=_scan_client, args=(port, ready), daemon=True).start()
+    assert ready.wait(3)
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        me = next((x for x in client.get("/api/shells/reverse/listeners").json()["listeners"]
+                   if x["id"] == lid), None)
+        if me and me["connected"]:
+            break
+        time.sleep(0.2)
+
+    host = client.get(f"/api/projects/{sandbox_project}/state").json()["hosts"][0]["id"]
+    reg = client.post("/api/shells/reverse/register", json={
+        "projectId": sandbox_project, "listenerId": lid, "hostId": host,
+        "type": "反弹 Shell（pytest stream）", "autoCollect": False}).json()
+    assert reg["ok"] is True, reg
+    ch = REVERSE_CHANNELS.get(reg["shell"]["id"])
+    assert ch is not None
+
+    lines: list[str] = []
+    res = ch.exec_stream("fscan -h 10.0.0.0/24", lines.append, timeout=5)
+    assert res.ok is True, res
+    assert lines == ["open 22", "open 80"]
+    assert res.output == "open 22\nopen 80"
+    client.delete("/api/shells/reverse/listeners")
+
+
+def _open_listener(client, port: int) -> str:
+    return client.post("/api/shells/reverse/listen",
+                       json={"bind": "127.0.0.1", "port": port, "waitS": 0}).json()["listener"]["id"]
+
+
+def _wait_connected(client, listener_id: str, timeout: float = 5.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        me = next((x for x in client.get("/api/shells/reverse/listeners").json()["listeners"]
+                   if x["id"] == listener_id), None)
+        if me and me["connected"]:
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def _register_reverse(client, project_id: str, listener_id: str) -> tuple[str, object]:
+    """把已回连的监听登记为会话，返回 (shellId, channel)。"""
+    from pivothub.api.shells import REVERSE_CHANNELS
+
+    host = client.get(f"/api/projects/{project_id}/state").json()["hosts"][0]["id"]
+    reg = client.post("/api/shells/reverse/register", json={
+        "projectId": project_id, "listenerId": listener_id, "hostId": host,
+        "type": "反弹 Shell（pytest pty）", "autoCollect": False}).json()
+    assert reg["ok"] is True, reg
+    return reg["shell"]["id"], REVERSE_CHANNELS[reg["shell"]["id"]]
+
+
+class _HangPTY:
+    """假 PTY 靶机：命令卡住时不再处理后续输入（模拟 ping 占住 shell），Ctrl+C 可恢复。"""
+
+    def __init__(self, conn: socket.socket) -> None:
+        self.conn = conn
+        self.buf = b""
+        self.hung = False
+        self.got_ctrlc = threading.Event()
+        self.raw_seen = bytearray()
+        self.lock = threading.Lock()
+
+    def run(self) -> None:
+        try:
+            self.conn.settimeout(0.5)
+            while True:
+                try:
+                    data = self.conn.recv(4096)
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break
+                if not data:
+                    break
+                with self.lock:
+                    self.raw_seen += data
+                if b"\x03" in data:
+                    self.hung = False
+                    self.buf = b""       # Ctrl+C 后 shell 丢弃输入缓冲
+                    self.got_ctrlc.set()
+                    self.conn.sendall(b"\r\n<prompt>$ ")
+                    data = data.replace(b"\x03", b"")
+                if self.hung:
+                    continue  # 卡住的命令不读后续输入（真实 shell 就是这样）
+                self.buf += data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+                while b"\n" in self.buf:
+                    line, self.buf = self.buf.split(b"\n", 1)
+                    text = line.decode("utf-8", "replace").strip()
+                    if text == "hang":
+                        self.hung = True
+                        self.buf = b""   # 同批次后续行（含哨兵）一并丢弃
+                        break
+                    elif text.startswith("echo "):
+                        self.conn.sendall((text[5:] + "\r\n").encode())
+                    elif text:
+                        self.conn.sendall((text + "\r\n<prompt>$ ").encode())
+        finally:
+            self.conn.close()
+
+
+def _hang_pty_client(port: int, ready: threading.Event, holder: dict) -> None:
+    conn = None
+    for _ in range(50):
+        try:
+            conn = socket.create_connection(("127.0.0.1", port), timeout=0.5)
+            break
+        except OSError:
+            time.sleep(0.1)
+    ready.set()
+    if conn is None:
+        return
+    pty = _HangPTY(conn)
+    holder["pty"] = pty
+    pty.run()
+
+
+def test_reverse_exec_timeout_sends_ctrlc_and_recovers(client, sandbox_project):
+    """ping 类卡死命令：超时后自动 Ctrl+C，通道可继续用（不再永久卡住）。"""
+    port = _free_port()
+    lid = _open_listener(client, port)
+    holder: dict = {}
+    ready = threading.Event()
+    threading.Thread(target=_hang_pty_client, args=(port, ready, holder), daemon=True).start()
+    assert ready.wait(3)
+    assert _wait_connected(client, lid)
+
+    shell_id, ch = _register_reverse(client, sandbox_project, lid)
+    pty = holder["pty"]
+
+    res = ch.exec("hang", timeout=1.2)
+    assert res.ok is False and res.timed_out is True, res
+    assert pty.got_ctrlc.wait(3), "超时后没有向目标发送 Ctrl+C"
+
+    # 通道恢复：后续哨兵命令仍可正常拿到回显
+    res2 = ch.exec("echo alive", timeout=3)
+    assert res2.ok is True, res2
+    assert "alive" in res2.output
+    assert client.delete("/api/shells/reverse/listeners").json()["closed"] >= 1
+
+
+def test_reverse_raw_sink_streams_and_api_input(client, sandbox_project):
+    """原始模式：目标输出逐块推给订阅者；/input 直接写 PTY。"""
+    from pivothub.api.shells import RAW_SINKS
+
+    port = _free_port()
+    lid = _open_listener(client, port)
+    holder: dict = {}
+    ready = threading.Event()
+    threading.Thread(target=_hang_pty_client, args=(port, ready, holder), daemon=True).start()
+    assert ready.wait(3)
+    assert _wait_connected(client, lid)
+
+    shell_id, ch = _register_reverse(client, sandbox_project, lid)
+    chunks: list[str] = []
+    ch.add_raw_sink(chunks.append)
+
+    r = client.post(f"/api/shells/{shell_id}/input", json={"data": "whoami\r"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    deadline = time.time() + 3
+    while time.time() < deadline and not any("whoami" in c for c in chunks):
+        time.sleep(0.1)
+    assert any("whoami" in c for c in chunks), chunks      # 命令回显进原始流
+    assert any("<prompt>$" in c for c in chunks), chunks   # 真实提示符也在原始流里
+
+    # 控制键映射：Ctrl+C 写入 \x03
+    r = client.post(f"/api/shells/{shell_id}/input", json={"key": "ctrl-c"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert holder["pty"].got_ctrlc.wait(3)
+
+    # /raw 开关：注册与注销订阅
+    assert client.post(f"/api/shells/{shell_id}/raw", json={"on": True}).json()["raw"] is True
+    assert shell_id in RAW_SINKS
+    assert client.post(f"/api/shells/{shell_id}/raw", json={"on": False}).json()["raw"] is False
+    assert shell_id not in RAW_SINKS
+    client.delete("/api/shells/reverse/listeners")
+
+
+def test_reverse_raw_input_rejects_http_shell(client, sandbox_project):
+    host = client.get(f"/api/projects/{sandbox_project}/state").json()["hosts"][0]["id"]
+    r = client.post("/api/shells", json={
+        "projectId": sandbox_project, "hostId": host, "type": "PHP 一句话马",
+        "url": "http://127.0.0.1:1/shell.php", "pass": "x", "encoder": "none",
+        "autoCollect": False})
+    sid = r.json()["id"]
+    assert client.post(f"/api/shells/{sid}/input", json={"data": "ls\r"}).status_code == 400
+    assert client.post(f"/api/shells/{sid}/raw", json={"on": True}).status_code == 400
+    client.delete(f"/api/shells/{sid}")
+
+
+def test_reverse_recent_output_replays_banner_without_sentinels(client, sandbox_project):
+    """终端打开时回放缓冲尾部：能看到连接横幅/提示符，但不泄露哨兵内部标记。"""
+    port = _free_port()
+    lid = _open_listener(client, port)
+    holder: dict = {}
+    ready = threading.Event()
+    threading.Thread(target=_hang_pty_client, args=(port, ready, holder), daemon=True).start()
+    assert ready.wait(3)
+    assert _wait_connected(client, lid)
+
+    shell_id, ch = _register_reverse(client, sandbox_project, lid)
+    ch.exec("echo BANNER_MARK")
+    ch.exec("whoami")
+    hist = ch.recent_output()
+    assert "BANNER_MARK" in hist
+    assert "<prompt>$" in hist
+    assert "PH_" not in hist
+    client.delete("/api/shells/reverse/listeners")
+
+
+def test_reverse_eof_marks_shell_dead(client, sandbox_project):
+    """靶机断开后会话必须标记断线（列表绿点不能骗人）。"""
+    port = _free_port()
+    lid = _open_listener(client, port)
+    holder: dict = {}
+    ready = threading.Event()
+    threading.Thread(target=_hang_pty_client, args=(port, ready, holder), daemon=True).start()
+    assert ready.wait(3)
+    assert _wait_connected(client, lid)
+
+    shell_id, ch = _register_reverse(client, sandbox_project, lid)
+    st = client.get(f"/api/projects/{sandbox_project}/state").json()
+    assert next(s for s in st["shells"] if s["id"] == shell_id)["alive"] is True
+
+    holder["pty"].conn.close()  # 靶机侧断开
+    deadline = time.time() + 5
+    alive = True
+    while time.time() < deadline:
+        st = client.get(f"/api/projects/{sandbox_project}/state").json()
+        alive = next(s for s in st["shells"] if s["id"] == shell_id)["alive"]
+        if not alive:
+            break
+        time.sleep(0.2)
+    assert alive is False
+
+
+def test_reverse_strip_ansi_charset_and_csi():
+    """ANSI 清洗要覆盖 ESC(B 字符集指定与 OSC——mysql 输出常见，漏掉会显示乱码。"""
+    from pivothub.session.reverse import ReverseShellChannel as C
+
+    raw = "\x1b(B\x1b(Bmysql  Ver 15.1\x1b[32m OK\x1b[0m\x1b]0;title\x07 done"
+    assert C._clean_line(raw) == "mysql  Ver 15.1 OK done"
+    assert C._strip_echo("cmd\r\n\x1b(Bout\x1b[0m\r\n", "cmd") == "out"

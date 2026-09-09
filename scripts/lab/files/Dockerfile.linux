@@ -1,0 +1,13 @@
+FROM php:8.2-apache
+
+# 终端固化技法依赖：python3（PTY）、util-linux（script）、socat、netcat
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 socat netcat-openbsd util-linux iputils-ping netbase \
+    && rm -rf /var/lib/apt/lists/*
+
+# 真实一句话马（CTF 教学用标准形态）
+COPY shell.php /var/www/html/shell.php
+COPY upload/ /var/www/html/upload/
+RUN chown -R www-data:www-data /var/www/html && chmod 644 /var/www/html/shell.php
+
+EXPOSE 80

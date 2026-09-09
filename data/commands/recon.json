@@ -1,0 +1,26 @@
+[
+  {
+    "id": "k-1",
+    "category": "信息收集",
+    "os": "Linux",
+    "title": "系统与身份信息",
+    "cmd": "id; whoami; uname -a; cat /etc/os-release; hostname -I; env",
+    "note": "一次拿全基础信息，Shell 连接后自动执行"
+  },
+  {
+    "id": "k-2",
+    "category": "信息收集",
+    "os": "Windows",
+    "title": "系统与域信息",
+    "cmd": "whoami /all & hostname & systeminfo | findstr /B /C:\"OS \" /C:\"Domain\" & ipconfig /all",
+    "note": "确认是否加域、补丁级别"
+  },
+  {
+    "id": "k-3",
+    "category": "信息收集",
+    "os": "Linux",
+    "title": "内网存活探测（经代理）",
+    "cmd": "for i in $(seq 1 254); do (ping -c1 -W1 {SEG}.$i >/dev/null 2>&1 && echo \"{SEG}.$i up\") & done; wait",
+    "note": "{SEG} 自动替换为当前主机所在网段前缀"
+  }
+]

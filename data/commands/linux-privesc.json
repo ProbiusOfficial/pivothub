@@ -1,0 +1,26 @@
+[
+  {
+    "id": "k-4",
+    "category": "Linux 提权",
+    "os": "Linux",
+    "title": "SUID 与能力检查",
+    "cmd": "find / -perm -4000 -type f 2>/dev/null; getcap -r / 2>/dev/null",
+    "note": ""
+  },
+  {
+    "id": "k-5",
+    "category": "Linux 提权",
+    "os": "Linux",
+    "title": "计划任务与可写服务",
+    "cmd": "cat /etc/crontab; ls -la /etc/cron.*; systemctl list-timers --all",
+    "note": ""
+  },
+  {
+    "id": "k-6",
+    "category": "Linux 提权",
+    "os": "Linux",
+    "title": "内核版本 exp 匹配线索",
+    "cmd": "uname -r; cat /proc/version; searchsploit \"Linux Kernel $(uname -r | cut -d- -f1)\"",
+    "note": "命中已知 CVE 时面板会置顶提示"
+  }
+]
