@@ -40,6 +40,9 @@
 .btn-danger:hover { background: rgba(255, 77, 94, 0.22); border-color: var(--err); }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
 .btn-ghost:hover { background: var(--bg-hover); color: var(--text); }
+/* 顶栏用：与 btn-ghost 同几何（透明底/透明边框），仅用红色文字与 hover 底色区分危险操作 */
+.btn-ghost-danger { background: transparent; border-color: transparent; color: var(--err); }
+.btn-ghost-danger:hover { background: var(--err-soft); border-color: rgba(255, 77, 94, 0.35); color: var(--err); }
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 .btn-xs { padding: 2px 7px; font-size: 11px; border-radius: var(--r-sm); }
 .btn-block { width: 100%; }
