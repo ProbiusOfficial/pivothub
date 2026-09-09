@@ -37,11 +37,13 @@ _ANSI_RE = re.compile(
 class ReverseShellListener:
     """一次监听：等待一个回连，成功后可取回通道。"""
 
-    def __init__(self, bind: str, port: int, label: str = "") -> None:
+    def __init__(self, bind: str, port: int, label: str = "",
+                 listener_id: str | None = None) -> None:
         self.bind = bind
         self.port = int(port)
         self.label = label
-        self.id = "rev-" + uuid.uuid4().hex[:8]
+        #: 持久化恢复时沿用原 id（面板重启后前端仍能对应同一条监听）
+        self.id = listener_id or ("rev-" + uuid.uuid4().hex[:8])
         self.connected = threading.Event()
         self._sock: Optional[socket.socket] = None
         self._conn: Optional[socket.socket] = None
@@ -143,7 +145,8 @@ class ReverseShellChannel(SessionBase):
     """
 
     kind = "reverse-shell"
-    platform = "linux"  # 回连方通常是 Linux 靶机；Windows 反弹可后续扩展
+    #: 回连方平台：登记时按回显识别（见 detect_platform），识别不出保守按 linux
+    platform = "linux"
     #: 缓冲区上限（无 exec 在跑时裁剪，只保留尾部）
     MAX_BUF = 4 * 1024 * 1024
 
@@ -464,10 +467,12 @@ class ReverseShellService:
         self._lock = threading.Lock()
 
     def open(self, bind: str, port: int, label: str = "",
-             replace_pending: bool = True) -> tuple["ReverseShellListener", bool]:
+             replace_pending: bool = True, listener_id: str | None = None
+             ) -> tuple["ReverseShellListener", bool]:
         """开监听。同地址端口已有「未回连」的监听时默认替换（休眠/断线后残留的监听会占住端口）。
 
         返回 (listener, replaced)。已有回连通道时拒绝替换——那条会话还在用这个端口。
+        listener_id 用于面板重启后按持久记录恢复监听（沿用原 id）。
         """
         with self._lock:
             old = next(
@@ -485,7 +490,7 @@ class ReverseShellService:
                 self._listeners.pop(old.id, None)
                 old.close()
                 replaced = True
-            lis = ReverseShellListener(bind, int(port), label)
+            lis = ReverseShellListener(bind, int(port), label, listener_id=listener_id)
             lis.start()
             self._listeners[lis.id] = lis
             return lis, replaced
@@ -518,3 +523,37 @@ class ReverseShellService:
 
 #: 进程内单例（面板一次运行内的监听表）
 SERVICE = ReverseShellService()
+
+
+#: 平台识别用：Linux 系系统名 / Windows 的「命令不存在」回显 / Windows 字样
+_UNIX_RE = re.compile(r"\b(Linux|Darwin|FreeBSD|OpenBSD|NetBSD)\b", re.I)
+_WIN_ERR_RE = re.compile(r"不是内部或外部命令|is not recognized|无法将|CommandNotFound", re.I)
+_WIN_RE = re.compile(r"Windows|Microsoft", re.I)
+
+
+def detect_platform(ch: "ReverseShellChannel") -> str:
+    """按回连回显判定目标平台（'linux' / 'windows'，识别不出返回 ''）。
+
+    探针 `uname -s`：Linux/macOS 直接给出系统名；Windows（cmd / PowerShell）下 uname
+    不存在，回显是「不是内部或外部命令 / 无法将…识别为 cmdlet」，据此判定为 Windows。
+    两者都无结论时补一次 `ver`（Windows 独有）。调用方对 '' 按 linux 兜底。
+    """
+    try:
+        res = ch.exec("uname -s", timeout=8)
+        text = (res.output or "") + "\n" + (res.error or "")
+    except Exception:
+        text = ""
+    if _UNIX_RE.search(text):
+        return "linux"
+    if _WIN_ERR_RE.search(text) or _WIN_RE.search(text):
+        return "windows"
+    try:
+        res2 = ch.exec("ver", timeout=8)
+        text2 = (res2.output or "") + "\n" + (res2.error or "")
+    except Exception:
+        text2 = ""
+    if _WIN_RE.search(text2):
+        return "windows"
+    if _UNIX_RE.search(text2):
+        return "linux"
+    return ""

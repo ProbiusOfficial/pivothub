@@ -447,3 +447,77 @@ def test_reverse_strip_ansi_charset_and_csi():
     raw = "\x1b(B\x1b(Bmysql  Ver 15.1\x1b[32m OK\x1b[0m\x1b]0;title\x07 done"
     assert C._clean_line(raw) == "mysql  Ver 15.1 OK done"
     assert C._strip_echo("cmd\r\n\x1b(Bout\x1b[0m\r\n", "cmd") == "out"
+
+
+def test_reverse_listener_persisted_and_restored(client):
+    """监听落库，面板重启（进程内监听清空）后按持久表恢复，id 保持不变。"""
+    from pivothub.api.shells import restore_reverse_listeners
+    from pivothub.session.reverse import SERVICE
+
+    port = _free_port()
+    lid = _open_listener(client, port)
+    listed = client.get("/api/shells/reverse/listeners").json()["listeners"]
+    me = next(x for x in listed if x["id"] == lid)
+    assert me["active"] is True and me["error"] == ""
+
+    # 模拟面板重启：清空进程内监听（持久表仍在），再走启动恢复
+    SERVICE.close_all()
+    gone = client.get("/api/shells/reverse/listeners").json()["listeners"]
+    me = next(x for x in gone if x["id"] == lid)
+    assert me["active"] is False  # 记录还在，但进程内已无监听
+
+    out = restore_reverse_listeners()
+    assert out["restored"] >= 1
+    back = client.get("/api/shells/reverse/listeners").json()["listeners"]
+    me = next(x for x in back if x["id"] == lid)
+    assert me["active"] is True and me["bind"] == "127.0.0.1" and me["port"] == port
+
+    # 显式关闭 → 持久记录一并删除
+    assert client.delete(f"/api/shells/reverse/listeners/{lid}").json()["ok"] is True
+    assert all(x["id"] != lid for x in client.get("/api/shells/reverse/listeners").json()["listeners"])
+
+
+def test_reverse_listener_restore_reports_failure(client):
+    """地址已失效时恢复失败要如实上报（不静默、不删记录）。"""
+    from pivothub.api.shells import restore_reverse_listeners
+    from pivothub.db import get_session_factory
+    from pivothub.models import ReverseListener
+
+    port = _free_port()
+    db = get_session_factory()()
+    try:
+        db.add(ReverseListener(id="rev-deadbeef", bind="10.255.255.254", port=port,
+                               label="已失效地址", created_at="2026-09-09 00:00:00"))
+        db.commit()
+    finally:
+        db.close()
+
+    out = restore_reverse_listeners()
+    assert any(f["id"] == "rev-deadbeef" for f in out["failed"])
+    listed = client.get("/api/shells/reverse/listeners").json()["listeners"]
+    me = next(x for x in listed if x["id"] == "rev-deadbeef")
+    assert me["active"] is False and me["error"]
+
+    # 清理：删除这条失败记录
+    client.delete("/api/shells/reverse/listeners/rev-deadbeef")
+
+
+def test_detect_platform_from_echo():
+    """平台识别：Linux 的 uname 回显 / Windows 的命令不存在回显 / 识别不出返回空。"""
+    from pivothub.session.base import ExecResult
+    from pivothub.session.reverse import detect_platform
+
+    class Fake:
+        def __init__(self, table):
+            self.table = table
+
+        def exec(self, cmd, timeout=15.0):
+            return ExecResult(ok=True, output=self.table.get(cmd, ""))
+
+    assert detect_platform(Fake({"uname -s": "Linux"})) == "linux"
+    assert detect_platform(Fake({"uname -s": "Darwin"})) == "linux"
+    assert detect_platform(Fake({
+        "uname -s": "'uname' 不是内部或外部命令，也不是可运行的程序或批处理文件。",
+        "ver": "Microsoft Windows [版本 10.0.19045.2965]",
+    })) == "windows"
+    assert detect_platform(Fake({})) == ""

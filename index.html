@@ -1137,7 +1137,10 @@
       <div class="panel">
         <div class="panel-head">
           <h3>② 监听与回连</h3>
-          <span class="muted tiny">{{ listeners.length }} 个监听 · {{ reverseShells.length }} 个反弹会话</span>
+          <span class="muted tiny">
+            {{ listeners.length }} 个监听 · {{ reverseShells.length }} 个反弹会话
+            <button v-if="failedListeners.length" class="btn btn-xs" @click="retryRestore">重试恢复（{{ failedListeners.length }}）</button>
+          </span>
         </div>
         <div class="rev-log" v-if="log.length">
           <div v-for="(l, i) in log" :key="i" class="mono tiny" :class="'term-' + l.k">{{ l.text }}</div>
@@ -1150,9 +1153,10 @@
             <tr v-for="l in listeners" :key="l.id">
               <td class="mono">{{ l.bind }}:{{ l.port }}</td>
               <td>
-                <span class="badge" :class="l.connected ? 'badge-ok' : 'badge-idle'">
-                  {{ l.connected ? '已回连 ' + (((l.peer || [])[0]) || '') : '等待中' }}
+                <span class="badge" :class="l.error ? 'badge-err' : (l.connected ? 'badge-ok' : 'badge-idle')">
+                  {{ l.error ? '未恢复' : (l.connected ? '已回连 ' + (((l.peer || [])[0]) || '') : '等待中') }}
                 </span>
+                <span v-if="l.error" class="muted tiny" :title="l.error"> {{ l.error }}</span>
               </td>
               <td><button class="btn btn-xs btn-danger" @click="closeOne(l.id)">关闭</button></td>
             </tr>

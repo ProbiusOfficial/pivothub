@@ -19,6 +19,8 @@ class Shell(Base):
     type: Mapped[str] = mapped_column(String(64), default="PHP 一句话马")
     #: 驱动类型：'' = 按 type/url 推导的 HTTP 马；'reverse' = 反弹 Shell 通道
     kind: Mapped[str] = mapped_column(String(16), default="")
+    #: 目标平台：'' = 未知（按主机 OS 推导）；'linux' / 'windows'（反弹会话按回连回显识别）
+    platform: Mapped[str] = mapped_column(String(16), default="")
     url: Mapped[str] = mapped_column(String(500))
     pwd: Mapped[str] = mapped_column(String(200), default="")
     encoder: Mapped[str] = mapped_column(String(32), default="none")

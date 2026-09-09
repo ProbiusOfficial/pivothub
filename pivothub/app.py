@@ -93,6 +93,14 @@ async def lifespan(app: FastAPI):
     reset = _reset_reverse_shells()
     if reset:
         log.info("已将 %d 个历史反弹 Shell 会话标记为断线（通道不跨进程存活）", reset)
+    try:
+        from .api.shells import restore_reverse_listeners
+
+        rr = restore_reverse_listeners()
+        if rr["restored"] or rr["failed"]:
+            log.info("反弹监听恢复：%d 个已恢复，%d 个待重试", rr["restored"], len(rr["failed"]))
+    except Exception:  # 恢复失败不阻塞面板启动
+        log.exception("反弹监听恢复失败")
     synced = _sync_local_machine()
     if synced:
         log.info("已按本机真实信息更新本机节点 / 攻击机网卡：%s", ", ".join(sorted(set(synced))))

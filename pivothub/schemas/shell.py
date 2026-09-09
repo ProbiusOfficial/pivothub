@@ -24,6 +24,8 @@ class ShellOut(BaseModel):
     stable: bool = False
     #: 驱动类型（'' = HTTP 马；'reverse' = 反弹 Shell 通道）——前端不消费，仅服务端区分
     kind: str = ""
+    #: 目标平台（'' = 未知，前端按主机 OS 推导；'linux' / 'windows'）
+    platform: str = ""
 
     @classmethod
     def of(cls, s) -> "ShellOut":
@@ -32,6 +34,7 @@ class ShellOut(BaseModel):
             encoder=s.encoder, alive=s.alive, latency=s.latency,
             lastBeat=beat_text(s.last_beat_at, s.alive), hostname=s.hostname,
             privilege=s.privilege, stable=s.stable, kind=getattr(s, "kind", "") or "",
+            platform=getattr(s, "platform", "") or "",
         )
 
 

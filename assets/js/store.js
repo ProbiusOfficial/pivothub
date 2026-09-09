@@ -470,6 +470,7 @@
 
   /* 目标平台判定：Windows 主机 / ASPX-ASP 马 → windows，否则 linux */
   function shellPlatform(s) {
+    if (s && s.platform) return s.platform;
     const host = hostsById[s.hostId] || {};
     if (/windows/i.test(host.os || '')) return 'windows';
     if (/asp/i.test(s.type || '')) return 'windows';
@@ -1294,6 +1295,13 @@
     return PivotAPI.get('/api/shells/reverse/listeners').catch(() => ({ listeners: [] }));
   }
 
+  /* 重试恢复面板重启时未能自动拉起的监听（地址又回来了等场景） */
+  function reverseRestoreListeners() {
+    if (!hasApi) return Promise.resolve({ restored: 0, failed: [] });
+    return PivotAPI.post('/api/shells/reverse/listeners/restore', {})
+      .catch(() => ({ restored: 0, failed: [] }));
+  }
+
   /* 关闭监听（释放端口；休眠/断线后残留的监听会占住端口） */
   function reverseCloseListener(listenerId) {
     if (!hasApi) return Promise.resolve({ ok: false });
@@ -1887,7 +1895,7 @@
     fileStateFor, cwdPath, refreshFileEntries, cdInto, cdTo, cdUp, cdIndex, fileEdit, downloadFile,
     testLink, restartLink, stopLink, removeLink,
     saveAttack, saveAttackFor, netinfo, saveTools, deployLink, relayPlan, probeShell,
-    reverseListen, reverseListeners, reverseRegister, reverseCloseListener, reverseCloseAll, execOn,
+    reverseListen, reverseListeners, reverseRestoreListeners, reverseRegister, reverseCloseListener, reverseCloseAll, execOn,
     reconScanStream, reconScanJob, reconScanCancel,
     addHost, removeHost, importScan, addCred, addFlag, addNote,
     buildMarkdown, init, toggleTimer, rid, sleep,

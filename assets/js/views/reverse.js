@@ -52,6 +52,7 @@
 
       const wsShells = computed(() => S.state.shells.filter((s) => s.kind !== 'reverse'));
       const reverseShells = computed(() => S.state.shells.filter((s) => s.kind === 'reverse'));
+      const failedListeners = computed(() => listeners.value.filter((l) => l.error));
       const kinds = Object.keys(PAYLOADS).map((k) => ({ key: k, label: PAYLOADS[k].label }));
 
       function payload() {
@@ -195,13 +196,29 @@
       function openSession(id) { S.openTerminalById(id); }
       function copyPayload() { S.copy(payload()); }
 
+      /* 重试恢复面板重启时未能自动拉起的监听（换网后地址又回来了等场景） */
+      function retryRestore() {
+        S.reverseRestoreListeners().then((out) => {
+          const n = (out && out.restored) || 0;
+          const bad = (out && out.failed) || [];
+          push(n ? 'ok' : 'warn', '重试恢复：成功 ' + n + ' 个' +
+            (bad.length ? '，仍失败 ' + bad.length + ' 个' : ''));
+          bad.forEach((f) => push('err', f.bind + ':' + f.port + ' — ' + f.error));
+          refreshListeners();
+        });
+      }
+
       initFromUi();
-      refreshListeners();
+      refreshListeners().then(() => {
+        failedListeners.value.forEach((l) =>
+          push('warn', '监听 ' + l.bind + ':' + l.port + ' 未自动恢复：' + (l.error || '未知原因')));
+      });
 
       return {
         ui, mode, shellId, bind, port, kind, running, listener, listeners, log, detected,
-        wsShells, reverseShells, kinds, payload,
-        start, send, closeOne, closeAll, refreshListeners, useDetected, openSession, copyPayload,
+        wsShells, reverseShells, kinds, payload, failedListeners,
+        start, send, closeOne, closeAll, refreshListeners, retryRestore, useDetected,
+        openSession, copyPayload,
         ipOf: S.ipOf, icon: global.icon,
       };
     },
