@@ -16,6 +16,7 @@ User www-data may run the following commands on web-dmz-01:
 /usr/bin/pkexec
 /usr/bin/python3.10 = cap_setuid+ep
 /etc/cron.d/backup
+/etc/passwd
 """
 
 WINDOWS_SAMPLE = r"""desktop-7f3k\webuser
@@ -41,13 +42,19 @@ def test_match_linux_sample():
     ids = {f["id"] for f in findings}
     for expected in ("linux-sudo-nopasswd", "linux-suid", "linux-caps",
                      "linux-pkexec-pwnkit", "linux-ld-preload", "linux-docker-group",
-                     "linux-cron-writable", "linux-kernel-dirtypipe"):
+                     "linux-cron-writable", "linux-kernel-dirtypipe",
+                     "linux-passwd-writable"):
         assert expected in ids, f"未命中: {expected}"
 
     suid = next(f for f in findings if f["id"] == "linux-suid")
     assert suid["evidence"] == "/usr/bin/find"  # 证据必须来自回显本身
     rels = [f["reliability"] for f in findings]
     assert rels == sorted(rels, reverse=True)
+
+    # 可写 /etc/passwd 必须带验证步骤（否则「已执行」会被误当成提权成功）
+    pw = next(f for f in findings if f["id"] == "linux-passwd-writable")
+    assert pw["verify"] and pw["expect"] == "uid=0\\(root\\)"
+    assert pw["cmd"].startswith("echo 'ph::0:0:root:")
 
 
 def test_match_windows_sample():

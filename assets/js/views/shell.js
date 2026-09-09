@@ -231,10 +231,40 @@
           S.termPush('ok', S.escapeHtml('[*] 命中 ' + findings.length + ' 条，执行最可信路径：' +
             top.name + '（' + top.reliability + '%）'));
           const cmd = String(top.cmd || '').split(/\r?\n/).filter((l) => l.trim())[0];
+          const verify = String(top.verify || '').split(/\r?\n/).filter((l) => l.trim())[0];
+
+          const printOut = (text, kind) => {
+            String(text || '').split(/\r?\n/).filter((l) => l.trim()).slice(0, 10)
+              .forEach((l) => S.termPush(kind, S.escapeHtml(l)));
+          };
+
+          /* 主命令与验证必须串行：并发发请求时验证会跑在写入之前（Tomcat 并发处理） */
           S.termPush('dim', S.escapeHtml('$ ' + cmd));
-          S.execCommand(cmd);
           scrollTerm();
-          S.toast('一键提权：已执行「' + top.name + '」', 'ok');
+          S.execOn(s.id, cmd).then((r1) => {
+            printOut((r1 && (r1.output || r1.error)) || '', 'dim');
+            if (!verify) {
+              S.toast('一键提权：已执行「' + top.name + '」', 'ok');
+              scrollTerm();
+              return;
+            }
+            S.termPush('dim', S.escapeHtml('$ ' + verify));
+            scrollTerm();
+            return S.execOn(s.id, verify).then((v) => {
+              const text = String((v && (v.output || v.error)) || '');
+              let okRoot = false;
+              try {
+                okRoot = !!top.expect && new RegExp(top.expect).test(text);
+              } catch (e) { okRoot = false; }
+              printOut(text, okRoot ? 'ok' : 'dim');
+              S.termPush(okRoot ? 'ok' : 'warn', S.escapeHtml(okRoot
+                ? '✅ 提权成功：已获得 root'
+                : '⚠ 命令已执行，但未取得 root（见上方输出，可能需要交互 TTY 或换一条路径）'));
+              S.toast(okRoot ? '一键提权成功：已获得 root' : '提权命令已执行，但未取得 root',
+                okRoot ? 'ok' : 'warn');
+              scrollTerm();
+            });
+          });
         });
       }
 

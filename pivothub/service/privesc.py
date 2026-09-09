@@ -116,6 +116,9 @@ def match_rules(platform: str, output: str, facts: dict | None = None) -> list[d
             "reliability": int(rule.get("reliability") or 0),
             "cmd": rule.get("cmd", ""),
             "note": rule.get("note", ""),
+            #: 可选的验证步骤：执行 cmd 后再跑它，用 expect 正则判定是否真的拿到权限
+            "verify": rule.get("verify", ""),
+            "expect": rule.get("expect", ""),
             "evidence": evidence,
         })
     out.sort(key=lambda x: (-x["reliability"], x["name"]))

