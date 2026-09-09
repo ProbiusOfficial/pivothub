@@ -14,12 +14,23 @@ def test_plugin_registry_listed(client):
     ids = {p["id"] for p in data["items"]}
     assert {"linux-privesc-extra", "privesc-rules-extra", "tty-fixes-extra"} <= ids
     assert data["allowedDirs"] == ["commands", "payloads", "tty_fixes", "privesc"]
-    assert all(not p["installed"] for p in data["items"] if p["id"] in ids)
+    # 不断言「未安装」：data/plugins 与真实面板共用，用户可能已经装了插件
+    for p in data["items"]:
+        if p["id"] in ids:
+            assert p["installable"] is True
+
+
+def _plugin_state(client, pid):
+    for p in client.get("/api/plugins").json()["items"]:
+        if p["id"] == pid:
+            return bool(p["installed"]), bool(p["enabled"])
+    return False, False
 
 
 def test_plugin_install_toggle_uninstall_affects_state(client):
     """安装后命令库出现插件命令，停用/卸载后消失（真实影响 /state）。"""
     pid = "linux-privesc-extra"
+    was_installed, was_enabled = _plugin_state(client, pid)
     try:
         r = client.post(f"/api/plugins/{pid}/install")
         assert r.status_code == 200 and r.json()["ok"] is True
@@ -41,22 +52,36 @@ def test_plugin_install_toggle_uninstall_affects_state(client):
         st = client.get("/api/projects/proj-1/state").json()
         assert "pl-linux-suid" in {c["id"] for c in st["commands"]}
     finally:
-        client.delete(f"/api/plugins/{pid}")
+        # 恢复用例开始前的状态（用户面板可能本来就装了该插件）
+        if was_installed:
+            client.post(f"/api/plugins/{pid}/install")
+            if not was_enabled:
+                client.post(f"/api/plugins/{pid}/toggle", json={"enabled": False})
+        else:
+            client.delete(f"/api/plugins/{pid}")
 
-    listed = {p["id"]: p for p in client.get("/api/plugins").json()["items"]}
-    assert listed[pid]["installed"] is False
+    if not was_installed:
+        listed = {p["id"]: p for p in client.get("/api/plugins").json()["items"]}
+        assert listed[pid]["installed"] is False
 
 
 def test_plugin_privesc_rules_contribute(client):
     pid = "privesc-rules-extra"
+    was_installed, was_enabled = _plugin_state(client, pid)
     try:
         assert client.post(f"/api/plugins/{pid}/install").json()["ok"] is True
         rules = client.get("/api/privesc/rules?platform=linux").json()["rules"]
         assert "pl-linux-nfs-no-root-squash" in {r["id"] for r in rules}
     finally:
-        client.delete(f"/api/plugins/{pid}")
-    rules = client.get("/api/privesc/rules?platform=linux").json()["rules"]
-    assert "pl-linux-nfs-no-root-squash" not in {r["id"] for r in rules}
+        if was_installed:
+            client.post(f"/api/plugins/{pid}/install")
+            if not was_enabled:
+                client.post(f"/api/plugins/{pid}/toggle", json={"enabled": False})
+        else:
+            client.delete(f"/api/plugins/{pid}")
+    if not was_installed:
+        rules = client.get("/api/privesc/rules?platform=linux").json()["rules"]
+        assert "pl-linux-nfs-no-root-squash" not in {r["id"] for r in rules}
 
 
 def test_plugin_install_unknown_and_bad_id(client):

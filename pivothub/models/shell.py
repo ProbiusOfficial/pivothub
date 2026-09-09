@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -21,6 +21,9 @@ class Shell(Base):
     kind: Mapped[str] = mapped_column(String(16), default="")
     #: 目标平台：'' = 未知（按主机 OS 推导）；'linux' / 'windows'（反弹会话按回连回显识别）
     platform: Mapped[str] = mapped_column(String(16), default="")
+    #: 提权上下文（WebShell 无状态，用包装器把后续命令以提权用户执行）
+    escalated_user: Mapped[str] = mapped_column(String(64), default="")
+    escalation_wrapper: Mapped[str] = mapped_column(Text, default="")
     url: Mapped[str] = mapped_column(String(500))
     pwd: Mapped[str] = mapped_column(String(200), default="")
     encoder: Mapped[str] = mapped_column(String(32), default="none")

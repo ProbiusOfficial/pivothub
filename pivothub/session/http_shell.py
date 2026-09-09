@@ -17,7 +17,8 @@ from typing import Optional
 from urllib import parse as _uparse
 from urllib import request as _ureq
 
-from .base import ExecResult, FileEntry, SessionBase, SessionError, b64e, ls_error_text, parse_ls_output
+from .base import ExecResult, FileEntry, SessionBase, SessionError, apply_cmd_wrapper, \
+    b64e, ls_error_text, parse_ls_output
 
 EOF_MARK = "[[PIVOTHUB_EOF]]"
 LINUX = "linux"
@@ -107,6 +108,8 @@ class HttpShellSession(SessionBase):
     # ---------------- 命令执行 ----------------
 
     def exec(self, cmd: str, timeout: float = 15.0) -> ExecResult:
+        # 提权上下文：命中并验证成功后，后续命令都以提权用户执行
+        cmd = apply_cmd_wrapper(cmd, getattr(self, "cmd_wrapper", ""))
         if self.lang == "php":
             payload = self._php_exec_payload(cmd)
             fields = {self.pwd: payload}

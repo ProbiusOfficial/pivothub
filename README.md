@@ -394,8 +394,10 @@ TtyFix{id,name,platform,target,needs[],reliability,risk,cmd,note,manual}   # 终
   预览数据；命令经会话在目标执行 `mysql` / `psql` / `redis-cli` / `sqlite3` / `sqlcmd`（无需本机驱动），
   回显优先 **base64 回传**（避免 WebShell 通道字符集把中文变成 `?`，目标无 base64 时自动退回明文），
   本机 SQLite 走 Python 内置模块。密码与凭据库同样明文存储（本机授权场景）；
-- **Shell 管理 · 一键提权**：终端面板底部一键执行「采集事实 → 匹配规则库 → 执行最可信路径」，
-  命中结果与执行命令都会打印在虚拟终端里；
+- **Shell 管理 · 一键提权**：终端面板底部一键执行「采集事实 → 匹配规则库 → 执行 → 验证 → 建立提权上下文」。
+  验证通过后：WebShell 会话自动套上命令包装器（`script -qc "su <user> -c %CMD%"`），**终端里直接敲的命令也以
+  root 执行**；反弹会话无 PTY 时先自动用 `script` 升级为真终端再 `su`，提示符变为 `root@host#`。
+  终端头部显示「已提权 <user>」徽标，可一键取消；
 - **插件市场**：数据插件（命令库 / 马模板 / 固化技法 / 提权规则），清单默认读 `data/plugins/registry.json`，
   可用 `PIVOTHUB_PLUGIN_REGISTRY` 指向远程清单；安装后并入对应视图，停用即撤下（不执行第三方代码）；
 - 冰蝎/哥斯拉协议（M1-7）为 PRD 二期内容，未包含。

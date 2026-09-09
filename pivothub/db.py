@@ -209,7 +209,9 @@ def init_db(seed: bool = True) -> None:
 _MIGRATIONS: dict[str, dict[str, str]] = {
     "projects": {"settings": "JSON"},
     "hosts": {"ifaces": "JSON"},
-    "shells": {"kind": "VARCHAR(16) DEFAULT ''", "platform": "VARCHAR(16) DEFAULT ''"},
+    "shells": {"kind": "VARCHAR(16) DEFAULT ''", "platform": "VARCHAR(16) DEFAULT ''",
+               "escalated_user": "VARCHAR(64) DEFAULT ''",
+               "escalation_wrapper": "TEXT DEFAULT ''"},
     "proxy_links": {
         "link_type": "VARCHAR(16) DEFAULT 'socks'",
         "listen_port": "INTEGER DEFAULT 0",

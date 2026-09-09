@@ -268,6 +268,9 @@ class ReverseShellChannel(SessionBase):
         return self.exec("echo __PIVOTHUB_ALIVE__")
 
     def exec(self, cmd: str, timeout: float = 15.0) -> ExecResult:
+        from .base import apply_cmd_wrapper
+
+        cmd = apply_cmd_wrapper(cmd, getattr(self, "cmd_wrapper", ""))
         marker = "PH_" + uuid.uuid4().hex[:10]
         start = self._begin_exec(timeout)
         t0 = time.perf_counter()

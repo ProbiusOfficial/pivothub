@@ -13,6 +13,20 @@ class SessionError(Exception):
     """会话层错误（网络失败/协议失败/目标不支持等）。"""
 
 
+def apply_cmd_wrapper(cmd: str, wrapper: str) -> str:
+    """把命令套进「提权包装器」：wrapper 里的 %CMD% 替换为 shell 安全引用的命令。
+
+    WebShell 是无状态的一次性执行，往 /etc/passwd 里加了 root 用户也不会让会话
+    本身变成 root。因此验证拿到 root 后，把后续每条命令套进
+    `script -qc "su <user> -c %CMD%" /dev/null` 之类的包装器执行。
+    """
+    if not wrapper or "%CMD%" not in wrapper:
+        return cmd
+    import shlex
+
+    return wrapper.replace("%CMD%", shlex.quote(cmd))
+
+
 @dataclass
 class ExecResult:
     ok: bool

@@ -74,12 +74,19 @@ def _open_session(db: DBSession, s: Shell):
         ch = REVERSE_CHANNELS.get(s.id)
         if ch is None:
             raise SessionError("反弹通道不存在或已断开（请重新监听并让靶机回连）")
+        wrap = getattr(s, "escalation_wrapper", "") or ""
+        if wrap:
+            ch.cmd_wrapper = wrap
         return ch
     host = db.get(Host, s.host_id)
     sess = get_session(s, host)
     if s.stable:
         sess.prefer_pty = True
     sess.timeout = min(getattr(sess, "timeout", 10), 6.0)  # 探针快速失败，避免心跳被死靶拖住
+    # 提权上下文：WebShell 无状态，用包装器让后续命令以提权用户执行
+    wrap = getattr(s, "escalation_wrapper", "") or ""
+    if wrap:
+        sess.cmd_wrapper = wrap
     return sess
 
 
@@ -937,3 +944,43 @@ def reverse_register(form: ReverseRegisterIn, db: DBSession = Depends(get_db)):
     out = ShellOut.of(s)
     manager.push("shell.created", shell=out.model_dump())
     return {"ok": True, "shell": out.model_dump(), "listener": lis.to_dict()}
+
+
+# ---------------------------------------------------------------------------
+# 提权上下文：WebShell 无状态，验证拿到 root 后把后续命令套进包装器执行
+# ---------------------------------------------------------------------------
+
+class EscalationIn(BaseModel):
+    user: str = ""
+    #: 包装器模板，%CMD% 为占位符，如 script -qc "su ph -c %CMD%" /dev/null
+    wrapper: str = ""
+
+
+@router.post("/shells/{shell_id}/escalation", response_model=ShellOut)
+def set_escalation(shell_id: str, form: EscalationIn, db: DBSession = Depends(get_db)):
+    """设置提权上下文：此后该会话的命令/文件操作都以 form.user 身份执行。"""
+    s = _get_shell(db, shell_id)
+    user = (form.user or "").strip()
+    wrapper = (form.wrapper or "").strip()
+    if not user:
+        raise HTTPException(400, "需要提权用户名")
+    if wrapper and "%CMD%" not in wrapper:
+        raise HTTPException(400, "wrapper 必须包含 %CMD% 占位符（或留空：交互会话已 su）")
+    s.escalated_user = user
+    s.escalation_wrapper = wrapper
+    db.commit()
+    out = ShellOut.of(s)
+    manager.push("shell.escalation", shellId=s.id, escalatedUser=user)
+    return out
+
+
+@router.delete("/shells/{shell_id}/escalation", response_model=ShellOut)
+def clear_escalation(shell_id: str, db: DBSession = Depends(get_db)):
+    """取消提权上下文（回到原用户执行）。"""
+    s = _get_shell(db, shell_id)
+    s.escalated_user = ""
+    s.escalation_wrapper = ""
+    db.commit()
+    out = ShellOut.of(s)
+    manager.push("shell.escalation", shellId=s.id, escalatedUser="")
+    return out

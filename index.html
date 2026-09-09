@@ -446,6 +446,10 @@
               虚拟终端 · <span class="mono">{{ ipOf(activeShell.hostId) }}</span>
               <span class="badge badge-info">{{ activeShell.type }}</span>
               <span class="badge" :class="modeBadge.cls">{{ modeBadge.text }}</span>
+              <span class="badge badge-ok" v-if="activeShell.escalatedUser"
+                    :title="'后续命令以 ' + activeShell.escalatedUser + ' 身份执行'">
+                已提权 {{ activeShell.escalatedUser }}
+              </span>
             </h3>
             <div class="row-gap">
               <span class="muted mono">{{ activeShell.privilege || '?' }}@{{ activeShell.hostname || 'target' }}</span>
@@ -519,7 +523,12 @@
               <button class="btn btn-xs btn-primary" :disabled="privescBusy || !activeShell" @click="oneClickPrivesc">
                 {{ privescBusy ? '提权中…' : '⚡ 一键提权' }}
               </button>
-              <span class="muted tiny" v-if="privescResult && privescResult.length">
+              <template v-if="activeShell.escalatedUser">
+                <span class="badge badge-ok">已提权 {{ activeShell.escalatedUser }}</span>
+                <span class="muted tiny">后续命令以该身份执行，终端里可直接 cat /flag*</span>
+                <button class="btn btn-xs" @click="clearEscalation()">取消提权</button>
+              </template>
+              <span class="muted tiny" v-else-if="privescResult && privescResult.length">
                 命中 {{ privescResult.length }} 条 · 首选：{{ privescResult[0].name }}（{{ privescResult[0].reliability }}%）
               </span>
               <span class="muted tiny" v-else>

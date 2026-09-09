@@ -76,6 +76,20 @@ def test_kernel_rule_skipped_on_other_kernel():
     assert "linux-kernel-dirtycow" in ids
 
 
+def test_crlf_output_matches_anchored_rules():
+    """反弹 PTY 回显是 CRLF：锚点规则（^/etc/passwd$）不能因此漏报。"""
+    from pivothub.service.privesc import match_rules
+
+    crlf = ("uid=1000(tomcat9) gid=1000(tomcat9)\r\n"
+            "Linux archive-web 6.1.0-26-amd64 x86_64 GNU/Linux\r\n"
+            "/usr/bin/mount\r\n/etc/passwd\r\n")
+    lf = crlf.replace("\r\n", "\n")
+    ids_crlf = {f["id"] for f in match_rules("linux", crlf)}
+    ids_lf = {f["id"] for f in match_rules("linux", lf)}
+    assert {"linux-passwd-writable", "linux-suid"} <= ids_crlf
+    assert ids_crlf == ids_lf
+
+
 def test_rules_endpoint(client):
     r = client.get("/api/privesc/rules")
     assert r.status_code == 200
@@ -97,3 +111,37 @@ def test_scan_unreachable_session_reports_error(client, sandbox_project):
     r = client.post(f"/api/shells/{s['id']}/privesc/scan")
     assert r.status_code == 200
     assert r.json()["ok"] is False and r.json()["error"]
+
+
+def test_apply_cmd_wrapper_quotes():
+    """包装器里的 %CMD% 必须做 shell 安全引用（命令含空格/引号也不能跑偏）。"""
+    from pivothub.session.base import apply_cmd_wrapper
+
+    w = 'script -qc "su ph -c %CMD%" /dev/null'
+    assert apply_cmd_wrapper("cat /flag3.txt", w) == \
+        'script -qc "su ph -c \'cat /flag3.txt\'" /dev/null'
+    assert apply_cmd_wrapper("id", "") == "id"
+    assert apply_cmd_wrapper("id", "no-placeholder") == "id"
+
+
+def test_escalation_endpoints(client, sandbox_project):
+    """提权上下文：设置 / 回读 / 校验 / 取消。"""
+    h = client.post("/api/hosts",
+                    json={"projectId": sandbox_project, "ip": "10.99.77.66"}).json()
+    s = client.post("/api/shells", json={
+        "projectId": sandbox_project, "hostId": h["id"], "type": "PHP 一句话马",
+        "url": "http://127.0.0.1:1/x.php", "pass": "x", "autoCollect": False,
+    }).json()
+    sid = s["id"]
+    r = client.post(f"/api/shells/{sid}/escalation",
+                    json={"user": "ph", "wrapper": 'script -qc "su ph -c %CMD%" /dev/null'})
+    assert r.status_code == 200 and r.json()["escalatedUser"] == "ph"
+
+    st = client.get(f"/api/projects/{sandbox_project}/state").json()
+    assert next(x for x in st["shells"] if x["id"] == sid)["escalatedUser"] == "ph"
+
+    assert client.post(f"/api/shells/{sid}/escalation",
+                       json={"user": "ph", "wrapper": "bad-no-placeholder"}).status_code == 400
+    assert client.post(f"/api/shells/{sid}/escalation", json={"user": ""}).status_code == 400
+
+    assert client.delete(f"/api/shells/{sid}/escalation").json()["escalatedUser"] == ""

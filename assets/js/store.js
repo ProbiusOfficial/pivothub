@@ -821,7 +821,7 @@
   function upgradePty() {
     const s = activeShell();
     if (!s || s.kind !== 'reverse') { toast('仅反弹会话支持获取 PTY', 'err'); return; }
-    if (termState.caps.tty || s.stable) { toast('该会话已经是 PTY', 'info'); return; }
+    if (termState.caps.tty) { toast('该会话已经是 PTY', 'info'); return; }
     const caps = termState.caps || {};
     let cmd = '';
     if (caps.python) cmd = "python3 -c 'import pty;pty.spawn(\"/bin/bash\")'";
@@ -1392,6 +1392,18 @@
       .catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
   }
 
+  /* ---------- 提权上下文（WebShell）：后续命令以提权用户执行 ---------- */
+  function shellEscalate(shellId, user, wrapper) {
+    if (!hasApi) return Promise.resolve(null);
+    return PivotAPI.post('/api/shells/' + encodeURIComponent(shellId) + '/escalation',
+      { user: user, wrapper: wrapper }).catch(() => null);
+  }
+  function shellEscalateClear(shellId) {
+    if (!hasApi) return Promise.resolve(null);
+    return PivotAPI.del('/api/shells/' + encodeURIComponent(shellId) + '/escalation')
+      .catch(() => null);
+  }
+
   function reverseRegister(opts) {
     if (!hasApi) return Promise.resolve({ ok: false, stage: 'offline', error: '后端不可用（请启动 python -m pivothub）' });
     return PivotAPI.post('/api/shells/reverse/register', {
@@ -1891,6 +1903,11 @@
         }
         break;
       }
+      case 'shell.escalation': {
+        const s = state.shells.find((x) => x.id === msg.shellId);
+        if (s) s.escalatedUser = msg.escalatedUser || '';
+        break;
+      }
       case 'cred.found': {
         if (msg.cred && !state.creds.some((x) => x.id === msg.cred.id)) state.creds.push(msg.cred);
         break;
@@ -1970,7 +1987,7 @@
     reverseListen, reverseListeners, reverseRestoreListeners, reverseRegister, reverseCloseListener, reverseCloseAll,
     dbList, dbCreate, dbDelete, dbTest, dbQuery, dbTables, dbSchema,
     pluginsList, pluginInstall, pluginToggle, pluginUninstall,
-    privescRules, privescScan, execOn,
+    privescRules, privescScan, execOn, shellEscalate, shellEscalateClear,
     reconScanStream, reconScanJob, reconScanCancel,
     addHost, removeHost, importScan, addCred, addFlag, addNote,
     buildMarkdown, init, toggleTimer, rid, sleep,
