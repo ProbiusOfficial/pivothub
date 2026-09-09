@@ -87,7 +87,7 @@
           </button>
         </div>
         <div class="sidebar-foot">
-          <div class="foot-line"><span>后端</span><b class="mono">{{ ws.online ? '127.0.0.1:8000' : '未连接' }}</b></div>
+          <div class="foot-line"><span>后端</span><b class="mono">{{ ws.online ? backendAddr : '未连接' }}</b></div>
           <div class="foot-line"><span>数据</span><b class="mono">SQLite · {{ stats.hosts }} 节点</b></div>
         </div>
       </nav>
@@ -101,6 +101,7 @@
         <files-view v-else-if="ui.view === 'files'"></files-view>
         <generator-view v-else-if="ui.view === 'generator'"></generator-view>
         <proxy-view v-else-if="ui.view === 'proxy'"></proxy-view>
+        <db-view v-else-if="ui.view === 'db'"></db-view>
         <asset-view v-else-if="ui.view === 'asset'"></asset-view>
         <cred-view v-else-if="ui.view === 'cred'"></cred-view>
         <flag-view v-else-if="ui.view === 'flag'"></flag-view>
@@ -2092,6 +2093,115 @@
   </div>
 </script>
 
+<!-- ============================= 模板：数据库面板 ============================= -->
+<script type="text/x-template" id="tpl-db">
+  <div class="view view-db">
+    <div class="view-head">
+      <div>
+        <h2>数据库面板</h2>
+        <p class="muted">经会话在目标上执行客户端命令（mysql / psql / redis-cli / sqlite3 / sqlcmd），结果表格可视化；本机 SQLite 直接读文件</p>
+      </div>
+      <div class="view-head-actions">
+        <button class="btn btn-sm btn-primary" @click="openForm">＋ 新建连接</button>
+      </div>
+    </div>
+
+    <div class="db-layout">
+      <div class="panel">
+        <div class="panel-head">
+          <h3>连接</h3>
+          <span class="muted tiny">{{ conns.length }} 个</span>
+        </div>
+        <p class="muted tiny" v-if="!conns.length">还没有数据库连接，点右上角「＋ 新建连接」。</p>
+        <div class="list-row" v-for="c in conns" :key="c.id" :class="{ 'is-active': c.id === activeId }" @click="pick(c)">
+          <span class="dot" :class="c.id === activeId ? 'is-on' : 'is-off'"></span>
+          <span class="grow">
+            <b>{{ c.name }}</b>
+            <span class="muted tiny mono"> {{ kindLabel(c.kind) }} · {{ c.host }}:{{ c.port || c.defaultPort }}</span>
+            <span class="muted tiny" v-if="c.shellId"> · 经会话</span>
+          </span>
+          <button class="btn btn-xs" @click.stop="test(c)">测试</button>
+          <button class="btn btn-xs btn-danger" @click.stop="remove(c)">删除</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel" v-if="showForm" style="margin-bottom:12px">
+          <div class="panel-head"><h3>新建数据库连接</h3></div>
+          <div class="form-row">
+            <label class="field"><span>名称</span><input class="input" v-model="form.name" placeholder="如 靶机 MySQL" /></label>
+            <label class="field">
+              <span>类型</span>
+              <select class="input" v-model="form.kind">
+                <option v-for="k in kinds" :key="k" :value="k">{{ kindLabel(k) }}</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="field"><span>主机 / SQLite 文件路径</span><input class="input mono" v-model="form.host" /></label>
+            <label class="field"><span>端口（0 = 默认）</span><input class="input mono" type="number" v-model.number="form.port" /></label>
+          </div>
+          <div class="form-row">
+            <label class="field"><span>用户名</span><input class="input mono" v-model="form.username" /></label>
+            <label class="field"><span>密码</span><input class="input mono" type="password" v-model="form.password" /></label>
+          </div>
+          <div class="form-row">
+            <label class="field"><span>库名（PostgreSQL 用）</span><input class="input mono" v-model="form.dbName" /></label>
+            <label class="field">
+              <span>经哪个会话执行</span>
+              <select class="input" v-model="form.shellId">
+                <option value="">本机执行（SQLite 可用）</option>
+                <option v-for="s in shells" :key="s.id" :value="s.id">{{ s.hostname || s.url }}</option>
+              </select>
+            </label>
+          </div>
+          <label class="field field-full"><span>备注</span><input class="input" v-model="form.note" /></label>
+          <div class="row-gap" style="margin-top:8px">
+            <button class="btn btn-primary" :disabled="busy" @click="save">保存</button>
+            <button class="btn" @click="showForm = false">取消</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>{{ active ? active.name : '选择左侧连接' }}</h3>
+            <div class="row-gap">
+              <button class="btn btn-xs" :disabled="!active" @click="quick('SELECT 1')">SELECT 1</button>
+              <button class="btn btn-xs" :disabled="!active" @click="listTables">库 / 表列表</button>
+            </div>
+          </div>
+          <textarea class="input mono textarea-lg" v-model="sql" placeholder="输入 SQL（如 SELECT * FROM users LIMIT 20）"></textarea>
+          <div class="row-gap" style="margin-top:8px">
+            <button class="btn btn-primary" :disabled="busy || !active" @click="run()">{{ busy ? '执行中…' : '执行' }}</button>
+            <span class="muted tiny" v-if="result && result.ms">耗时 {{ result.ms }}ms</span>
+            <span class="muted tiny mono" v-if="result && result.cmd" :title="result.cmd">{{ result.cmd.slice(0, 90) }}</span>
+          </div>
+
+          <div class="callout" v-if="testOut">
+            <b>{{ testOut.ok ? '✓ 连接成功' : '✗ 连接失败' }}</b>
+            <p class="muted tiny mono">{{ testOut.error || ((testOut.columns || []).join(' | ') + ' ' + ((testOut.rows || [])[0] || []).join(' | ')) }}</p>
+          </div>
+          <div class="callout" v-if="result && result.error" style="border-color: rgba(255, 77, 94, 0.4)">
+            <b>执行失败</b>
+            <p class="muted tiny mono">{{ result.error }}</p>
+          </div>
+
+          <table class="table" v-if="result && result.ok && result.columns.length">
+            <thead><tr><th v-for="c in result.columns" :key="c">{{ c }}</th></tr></thead>
+            <tbody>
+              <tr v-for="(row, i) in result.rows.slice(0, 500)" :key="i">
+                <td v-for="(v, j) in row" :key="j" class="mono">{{ v }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="muted tiny" v-if="result && result.ok && result.rows.length > 500">仅显示前 500 行（共 {{ result.rows.length }} 行）</p>
+          <p class="muted tiny" v-if="result && result.ok && !result.rows.length">查询成功，无数据行。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</script>
+
 <!-- ============================= 模板：导出 ============================= -->
 <script type="text/x-template" id="tpl-export">
   <div class="view view-export">
@@ -2274,6 +2384,7 @@
 <script src="assets/js/views/reverse.js"></script>
 <script src="assets/js/views/generator.js"></script>
 <script src="assets/js/views/proxy.js"></script>
+<script src="assets/js/views/db.js"></script>
 <script src="assets/js/views/asset.js"></script>
 <script src="assets/js/views/cred.js"></script>
 <script src="assets/js/views/flag.js"></script>

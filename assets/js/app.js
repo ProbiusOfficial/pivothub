@@ -14,7 +14,9 @@
     console.warn('[PivotHub] ECharts 未加载，拓扑图将不可用。');
   }
 
-  const S = PivotStore;
+      const S = PivotStore;
+      /* 面板由后端托管，location.host 即后端地址（换端口 / 远程访问时不再写死） */
+      const backendAddr = global.location.host || '127.0.0.1:8000';
   S.init();
 
   const app = Vue.createApp({
@@ -131,6 +133,7 @@
       return {
         ui: S.state.ui,
         ws: S.state.ws,
+        backendAddr,
         timer: S.state.timer,
         stats: S.stats,
         clockText: S.clockText,

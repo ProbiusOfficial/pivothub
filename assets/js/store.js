@@ -241,6 +241,7 @@
         { key: 'files', label: '文件管理', icon: 'folder' },
         { key: 'generator', label: '马生成器', icon: 'code' },
         { key: 'proxy', label: '代理编排台', icon: 'network' },
+        { key: 'db', label: '数据库', icon: 'database' },
       ],
     },
     {
@@ -1313,6 +1314,38 @@
     return PivotAPI.del('/api/shells/reverse/listeners').catch(() => ({ ok: false, closed: 0 }));
   }
 
+  /* ---------- 数据库面板 ---------- */
+  function dbList() {
+    if (!hasApi) return Promise.resolve({ connections: [], kinds: [], defaultPorts: {} });
+    return PivotAPI.get('/api/db/connections?projectId=' + encodeURIComponent(state.projectId))
+      .catch(() => ({ connections: [], kinds: [], defaultPorts: {} }));
+  }
+  function dbCreate(form) {
+    if (!hasApi) return Promise.resolve(null);
+    return PivotAPI.post('/api/db/connections',
+      Object.assign({ projectId: state.projectId }, form || {})).catch(() => null);
+  }
+  function dbDelete(id) {
+    if (!hasApi) return Promise.resolve({ deleted: '' });
+    return PivotAPI.del('/api/db/connections/' + encodeURIComponent(id))
+      .catch(() => ({ deleted: '' }));
+  }
+  function dbTest(id) {
+    if (!hasApi) return Promise.resolve({ ok: false, error: '后端不可用' });
+    return PivotAPI.post('/api/db/connections/' + encodeURIComponent(id) + '/test', {})
+      .catch(() => ({ ok: false, error: '后端不可达' }));
+  }
+  function dbQuery(id, sql) {
+    if (!hasApi) return Promise.resolve({ ok: false, error: '后端不可用' });
+    return PivotAPI.post('/api/db/connections/' + encodeURIComponent(id) + '/query', { sql })
+      .catch(() => ({ ok: false, error: '后端不可达' }));
+  }
+  function dbTables(id) {
+    if (!hasApi) return Promise.resolve({ ok: false, error: '后端不可用' });
+    return PivotAPI.get('/api/db/connections/' + encodeURIComponent(id) + '/tables')
+      .catch(() => ({ ok: false, error: '后端不可达' }));
+  }
+
   /* ---------- 提权智能匹配（M5-2） ---------- */
   function privescRules(platform) {
     if (!hasApi) return Promise.resolve({ rules: [] });
@@ -1909,6 +1942,7 @@
     testLink, restartLink, stopLink, removeLink,
     saveAttack, saveAttackFor, netinfo, saveTools, deployLink, relayPlan, probeShell,
     reverseListen, reverseListeners, reverseRestoreListeners, reverseRegister, reverseCloseListener, reverseCloseAll,
+    dbList, dbCreate, dbDelete, dbTest, dbQuery, dbTables,
     privescRules, privescScan, execOn,
     reconScanStream, reconScanJob, reconScanCancel,
     addHost, removeHost, importScan, addCred, addFlag, addNote,

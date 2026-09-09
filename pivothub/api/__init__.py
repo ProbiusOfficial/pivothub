@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from . import attack, creds, export, flags, hosts, links, privesc, projects, recon, shells, \
-    stage, timeline, tools
+from . import attack, creds, db, export, flags, hosts, links, privesc, projects, recon, \
+    shells, stage, timeline, tools
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(projects.router)
@@ -17,3 +17,4 @@ api_router.include_router(timeline.router)
 api_router.include_router(export.router)
 api_router.include_router(stage.router)
 api_router.include_router(privesc.router)
+api_router.include_router(db.router)
