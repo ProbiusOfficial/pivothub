@@ -107,6 +107,7 @@
         <flag-view v-else-if="ui.view === 'flag'"></flag-view>
         <timeline-view v-else-if="ui.view === 'timeline'"></timeline-view>
         <cheat-view v-else-if="ui.view === 'cheat'"></cheat-view>
+        <plugins-view v-else-if="ui.view === 'plugins'"></plugins-view>
         <export-view v-else-if="ui.view === 'export'"></export-view>
         <dashboard-view v-else></dashboard-view>
       </main>
@@ -2202,6 +2203,62 @@
   </div>
 </script>
 
+<!-- ============================= 模板：插件市场 ============================= -->
+<script type="text/x-template" id="tpl-plugins">
+  <div class="view view-plugins">
+    <div class="view-head">
+      <div>
+        <h2>插件市场</h2>
+        <p class="muted">数据插件（命令库 / 马模板 / 固化技法 / 提权规则）：安装后立即并入对应视图，停用即撤下</p>
+      </div>
+      <div class="view-head-actions">
+        <select class="input input-sm" v-model="filter" style="width:160px">
+          <option value="all">全部插件</option>
+          <option value="installed">已安装（{{ installedCount }}）</option>
+          <option value="commands">命令库</option>
+          <option value="privesc">提权规则</option>
+          <option value="tty_fixes">固化技法</option>
+          <option value="payloads">马模板</option>
+        </select>
+        <button class="btn btn-sm" @click="load">刷新</button>
+      </div>
+    </div>
+
+    <p class="muted tiny">
+      清单来源：<span class="mono">{{ source || '(未配置)' }}</span>
+      <span class="badge badge-warn" v-if="remoteError">远程清单不可达，已回落本地</span>
+    </p>
+
+    <div class="plugin-grid">
+      <div class="panel" v-for="p in filtered" :key="p.id">
+        <div class="panel-head">
+          <h3>{{ p.name }}</h3>
+          <span class="badge badge-info">{{ typeLabel(p.type) }}</span>
+        </div>
+        <p class="muted tiny">{{ p.description || '（无描述）' }}</p>
+        <div class="row-gap" style="margin:6px 0">
+          <span class="badge badge-idle" v-if="p.version">v{{ p.version }}</span>
+          <span class="badge badge-idle" v-if="p.author">{{ p.author }}</span>
+          <span class="badge badge-idle" v-if="p.fileCount">{{ p.fileCount }} 个文件</span>
+          <span class="badge" :class="p.installed ? (p.enabled ? 'badge-ok' : 'badge-warn') : 'badge-idle'">
+            {{ p.installed ? (p.enabled ? '已启用' : '已停用') : '未安装' }}
+          </span>
+        </div>
+        <div class="row-gap">
+          <button class="btn btn-sm btn-primary" v-if="!p.installed && p.installable"
+                  :disabled="busyId === p.id" @click="install(p)">{{ busyId === p.id ? '安装中…' : '安装' }}</button>
+          <button class="btn btn-sm" v-if="p.installed" :disabled="busyId === p.id" @click="toggle(p)">
+            {{ p.enabled ? '停用' : '启用' }}
+          </button>
+          <button class="btn btn-sm btn-danger" v-if="p.installed" :disabled="busyId === p.id" @click="uninstall(p)">卸载</button>
+          <span class="muted tiny" v-if="!p.installable && !p.installed">该清单项未内联内容，需手工安装</span>
+        </div>
+      </div>
+    </div>
+    <p class="muted tiny" v-if="!filtered.length">没有匹配的插件。</p>
+  </div>
+</script>
+
 <!-- ============================= 模板：导出 ============================= -->
 <script type="text/x-template" id="tpl-export">
   <div class="view view-export">
@@ -2390,6 +2447,7 @@
 <script src="assets/js/views/flag.js"></script>
 <script src="assets/js/views/timeline.js"></script>
 <script src="assets/js/views/cheat.js"></script>
+<script src="assets/js/views/plugins.js"></script>
 <script src="assets/js/views/export.js"></script>
 <script src="assets/js/views/dashboard.js"></script>
 <script src="assets/js/app.js"></script>

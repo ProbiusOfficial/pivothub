@@ -3,7 +3,7 @@
 > 更新时间：2026-09-09
 > 形态：**前端原型 + FastAPI 后端（全栈）**——数据落 SQLite，命令执行 / 文件读写 / 出网探测 / 终端固化
 > 全部走真实会话层，后端不可用时前端显式报错，**不用假数据兜底**（`assets/js/mock.js` 已于第 4 轮移除）。
-> 后端回归：`pytest tests/ -q -p no:warnings` → **137 passed**（2026-09-09 本机实测）。
+> 后端回归：`pytest tests/ -q -p no:warnings` → **153 passed**（2026-09-09 本机实测）。
 > 前端回归：`.verify/` 12 视图 0 错误 0 警告（`README.md` §8 记录，本轮未复跑）。
 
 ---
@@ -12,7 +12,7 @@
 
 PRD 的 M1–M6 主体已实现并跑通：WebShell 会话管理、虚拟终端与终端固化（M1-8）、反弹 Shell 引导、
 出网探测与 chisel 链路编排、资产 / 凭据 / Flag / 时间线、三格式复盘导出。
-未完成的是 PRD 二期（冰蝎 / 哥斯拉、提权 exp 匹配）、7 款占位 Adapter，以及 M6-3 打包导出。
+未完成的是 PRD 二期（冰蝎 / 哥斯拉）、7 款占位 Adapter，以及 M6-3 打包导出。
 
 ---
 
@@ -21,7 +21,7 @@ PRD 的 M1–M6 主体已实现并跑通：WebShell 会话管理、虚拟终端�
 | 层 | 位置 | 现状 |
 |---|---|---|
 | 前端 | `index.html` + `assets/` | Vue 3（CDN）+ ECharts 5，零构建；12 个导航视图 + `views/reverse.js` 反弹引导视图 |
-| API | `pivothub/api/` | FastAPI，**58 个端点**：projects / hosts / shells / links / creds / flags / timeline / export / recon / stage / tools / attack / netinfo |
+| API | `pivothub/api/` | FastAPI，**71 个端点**：projects / hosts / shells / links / creds / flags / timeline / export / recon / stage / tools / attack / netinfo / privesc / db / plugins |
 | 服务层 | `pivothub/service/` | 出网探测、终端固化、文件暂存双通道、链路编排、资产探测、统计、导出、时间线 |
 | 会话层 | `pivothub/session/` | 命令执行与文件读写的**唯一出口**：HTTP 马 / 本地进程 / 反弹通道 |
 | 适配器 | `pivothub/adapters/` | **仅 chisel 已接入**；frp / nps / Neo-reGeorg / EW / Stowaway / Venom / ligolo-ng 为占位（`data/meta.json` 标 `offline`，面板不可启用） |
@@ -45,9 +45,10 @@ PRD 的 M1–M6 主体已实现并跑通：WebShell 会话管理、虚拟终端�
 
 - 代理工具仅 chisel 可用，其余 7 款下线不可启用（MS4 范围，`docs/ASSUMPTIONS.md` A-22）；
 - 断链自动重拉；
-- M1-7 冰蝎 / 哥斯拉协议、M5-2 提权 exp 智能匹配（PRD 二期）；
+- M1-7 冰蝎 / 哥斯拉协议（PRD 二期）；
 - M6-3 项目导入 / 导出打包：界面就绪，后端接口未实现；
-- 反弹会话平台判定固定 `linux`；面板重启后监听不自动恢复、历史反弹会话标记断线；
+- 反弹会话：平台已按 `uname -s` 回显识别，监听已持久化并在面板重启后自动恢复；
+  仅「历史反弹会话重启后标记断线」保留——通道是进程内 socket，属预期行为；
 - Windows 靶机终端固化诚实判定失败（无 Linux pty），完整成功路径需 `scripts/lab` 的 Linux 靶机。
 
 ---
@@ -56,7 +57,7 @@ PRD 的 M1–M6 主体已实现并跑通：WebShell 会话管理、虚拟终端�
 
 | 项 | 命令 / 来源 | 结果 |
 |---|---|---|
-| 后端全量回归 | `pytest tests/ -q -p no:warnings` | **137 passed**（403s，2026-09-09 本机实测） |
+| 后端全量回归 | `pytest tests/ -q -p no:warnings` | **153 passed**（403s，2026-09-09 本机实测） |
 | 前端 12 视图 | `node .verify/cdp-test.js`（需 8777 静态服务） | 0 错误 0 警告（`README.md` §8） |
 | 项目删除 E2E | CDP 实测：顶栏「－ 删除」→ confirm → 级联删除 → 自动切换 | PASS（临时库，12 视图复跑 0 错误） |
 | 端到端 | `.verify/deep-test.js` · `tty-test.js` · `proxy-test.js` 等 8 个脚本 | 见 `README.md` §8 |

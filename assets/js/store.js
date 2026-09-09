@@ -256,6 +256,7 @@
       title: '辅助',
       items: [
         { key: 'cheat', label: '命令速查', icon: 'book' },
+        { key: 'plugins', label: '插件市场', icon: 'plus' },
         { key: 'export', label: '复盘导出', icon: 'download' },
       ],
     },
@@ -1314,6 +1315,26 @@
     return PivotAPI.del('/api/shells/reverse/listeners').catch(() => ({ ok: false, closed: 0 }));
   }
 
+  /* ---------- 插件市场 ---------- */
+  function pluginsList() {
+    if (!hasApi) return Promise.resolve({ items: [], registrySource: '' });
+    return PivotAPI.get('/api/plugins').catch(() => ({ items: [], registrySource: '' }));
+  }
+  function pluginInstall(id) {
+    if (!hasApi) return Promise.resolve({ ok: false });
+    return PivotAPI.post('/api/plugins/' + encodeURIComponent(id) + '/install', {})
+      .catch(() => ({ ok: false }));
+  }
+  function pluginToggle(id, enabled) {
+    if (!hasApi) return Promise.resolve({ ok: false });
+    return PivotAPI.post('/api/plugins/' + encodeURIComponent(id) + '/toggle', { enabled })
+      .catch(() => ({ ok: false }));
+  }
+  function pluginUninstall(id) {
+    if (!hasApi) return Promise.resolve({ ok: false });
+    return PivotAPI.del('/api/plugins/' + encodeURIComponent(id)).catch(() => ({ ok: false }));
+  }
+
   /* ---------- 数据库面板 ---------- */
   function dbList() {
     if (!hasApi) return Promise.resolve({ connections: [], kinds: [], defaultPorts: {} });
@@ -1943,6 +1964,7 @@
     saveAttack, saveAttackFor, netinfo, saveTools, deployLink, relayPlan, probeShell,
     reverseListen, reverseListeners, reverseRestoreListeners, reverseRegister, reverseCloseListener, reverseCloseAll,
     dbList, dbCreate, dbDelete, dbTest, dbQuery, dbTables,
+    pluginsList, pluginInstall, pluginToggle, pluginUninstall,
     privescRules, privescScan, execOn,
     reconScanStream, reconScanJob, reconScanCancel,
     addHost, removeHost, importScan, addCred, addFlag, addNote,

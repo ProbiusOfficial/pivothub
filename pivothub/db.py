@@ -166,17 +166,25 @@ def set_tools(db, project_id: str, enabled: list[str]) -> list[dict]:
 
 
 def load_plugin_dir(sub: str) -> list[dict]:
-    """读取 data/<sub>/*.json 插件目录（命令库/马模板/固化技法）。"""
+    """读取 data/<sub>/*.json 插件目录（命令库/马模板/固化技法/提权规则）。
+
+    同时并入「插件市场」已启用插件在 data/plugins/<id>/<sub>/ 下贡献的数据。
+    """
     items: list[dict] = []
     d = config.DATA_DIR / sub
-    if not d.is_dir():
-        return items
-    for p in sorted(d.glob("*.json")):
-        data = _load_json(p)
-        if isinstance(data, list):
-            items.extend(data)
-        else:
-            items.append(data)
+    if d.is_dir():
+        for p in sorted(d.glob("*.json")):
+            data = _load_json(p)
+            if isinstance(data, list):
+                items.extend(data)
+            else:
+                items.append(data)
+    try:
+        from .service.plugins import contributions
+
+        items.extend(contributions(sub))
+    except Exception:  # 插件目录异常不影响核心数据加载
+        log.exception("加载插件贡献失败: %s", sub)
     return items
 
 

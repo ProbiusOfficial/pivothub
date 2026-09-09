@@ -236,6 +236,8 @@ select.input option { background: var(--bg-1); color: var(--text); }
 /* 数据库面板：左连接列表 + 右查询区 */
 .db-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 14px; align-items: start; }
 @media (max-width: 1100px) { .db-layout { grid-template-columns: 1fr; } }
+/* 插件市场：卡片网格 */
+.plugin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
 
 .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
 .kv-grid > div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }

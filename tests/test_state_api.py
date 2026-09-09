@@ -57,10 +57,11 @@ def test_shell_fields_match_contract(client):
     s = next(x for x in d["shells"] if x["id"] == "s-1")
     assert set(s.keys()) == {
         "id", "hostId", "type", "url", "pass", "encoder", "alive", "latency",
-        "lastBeat", "hostname", "privilege", "stable", "kind",
+        "lastBeat", "hostname", "privilege", "stable", "kind", "platform",
     }
     assert s["pass"] == "rebeyond" and s["stable"] is True
     assert s["kind"] == ""  # HTTP 马；反弹 Shell 通道为 'reverse'
+    assert s["platform"] == ""  # 未知时留空，前端按主机 OS 推导
 
 
 def test_link_fields_match_contract(client):

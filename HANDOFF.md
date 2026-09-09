@@ -2,7 +2,7 @@
 
 > 更新时间：2026-09-09
 > 本仓库是 **前端原型 + FastAPI 后端的全栈基线**（早期「纯前端交付包」版本已作废）。
-> 后端回归 `pytest tests/ -q -p no:warnings` → **137 passed**；接口契约已在代码中落地，不再有「待补字段」清单。
+> 后端回归 `pytest tests/ -q -p no:warnings` → **153 passed**；接口契约已在代码中落地，不再有「待补字段」清单。
 
 ---
 
@@ -54,9 +54,9 @@
    前端无需改动（`docs/ASSUMPTIONS.md` A-22）。
 2. **断链自动重拉**（`README.md` §9 列为未实现）。
 3. **M6-3 项目导入 / 导出打包**：前端按钮就绪，后端接口待实现。
-4. **反弹会话完善**：平台判定目前固定 `linux`；面板重启后监听不自动恢复、历史反弹会话标记断线
-   （`docs/PROGRESS.md` 第 6 轮未决问题）。
-5. **PRD 二期**：M1-7 冰蝎 / 哥斯拉协议、M5-2 提权 exp 智能匹配。
+4. **反弹会话**：平台识别（`uname -s` 回显）与监听持久化 / 自动恢复已落地；仅剩「历史会话重启后标记断线」——
+   通道是进程内 socket，属预期行为（监听已自动恢复，靶机重连即可再登记）。
+5. **PRD 二期**：M1-7 冰蝎 / 哥斯拉协议。
 
 ---
 
@@ -64,7 +64,7 @@
 
 ```bash
 pip install -r requirements.txt
-pytest tests/ -q -p no:warnings        # 137 passed
+pytest tests/ -q -p no:warnings        # 153 passed
 python run.py                          # 127.0.0.1:8000，后端托管前端
 ```
 

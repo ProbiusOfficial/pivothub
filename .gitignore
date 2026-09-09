@@ -32,3 +32,6 @@ pivothub-frontend-baseline-*.zip
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 插件市场：安装到 data/plugins/<id>/ 的内容属于运行时数据
+/data/plugins/*/

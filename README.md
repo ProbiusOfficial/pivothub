@@ -60,8 +60,9 @@ supershell/
 │     ├─ store.js                 # 全局 store：状态 + 派生数据 + 全部业务动作
 │     ├─ icons.js  topology.js  app.js  components/common.js
 │     └─ views/                   # dashboard shell recon files generator proxy
-│                                 #   asset cred flag timeline cheat export reverse
-├─ data/                          # 插件数据：commands payloads tty_fixes seed_project
+│                                 #   asset cred flag timeline cheat export reverse db plugins
+├─ data/                          # 插件数据：commands payloads tty_fixes privesc seed_project
+│                                 #   plugins/（市场清单与已安装插件，安装内容不入库）
 ├─ tests/                         # 后端 pytest 用例
 ├─ scripts/                       # 靶场 Compose / 联调 / 防火墙脚本
 ├─ tools/                         # chisel / fscan 二进制（Adapter 部署与内网扫描用）
@@ -107,6 +108,7 @@ supershell/
 | M4-3 | 比赛计时 / 阶段看板 | 顶栏倒计时 + **阶段看板**（已控主机/层级/Flag/剩余时间） | ✅ |
 | M4-4 | Writeup 半自动生成 | **复盘导出** · MD/HTML/JSON 三格式 + 选项 + 实时预览 + 下载 | ✅ |
 | M5-1 | 红队命令速查库 | **命令速查** · 6 大分类 + 搜索 + 变量替换 + 发送到终端 | ✅ |
+| M5-2 | 智能建议：按当前主机 OS / 权限 / 内核版本推荐提权路径 | **命令速查** · 「提权智能匹配」：选会话 → 真实采集（内核 / sudo / SUID / capabilities / cron / 服务权限）→ 规则库命中（含内核 CVE 版本判断）→ 证据 + 建议命令可一键发送 | ✅ |
 | M6-1 | SQLite 持久化 / 多项目 | 顶栏项目切换器 + 后端新建项目；数据落 SQLite | ✅ |
 | M6-2 | 导出三格式 | **复盘导出** | ✅ |
 | M6-3 | 项目导入/导出打包 | 复盘导出 · 「打包项目」按钮 | 🟡 界面就绪 |
@@ -209,7 +211,7 @@ CTF / 靶场里拿到的绝大多数是**基于 Web 应用 RCE 落地的 WebShel
 ## 6. 后端接口契约（FastAPI + WebSocket）
 
 界面逻辑全部收敛在 `PivotStore`（`assets/js/store.js`），数据一律来自后端（无 mock 回退）。
-下表即**当前已实现**的接口（`pivothub/api/`，共 58 个端点），字段契约以 `pivothub/schemas/` 为准。
+下表即**当前已实现**的接口（`pivothub/api/`，共 71 个端点），字段契约以 `pivothub/schemas/` 为准。
 
 ### 6.1 REST 接口
 
@@ -266,6 +268,10 @@ CTF / 靶场里拿到的绝大多数是**基于 Web 应用 RCE 落地的 WebShel
 | POST | `/api/flags` | 记录 Flag | `addFlag()` |
 | POST | `/api/timeline/notes` | 添加笔记 | `addNote()` |
 | GET | `/api/export?format=md\|html\|json` | 导出 | `buildMarkdown()` |
+| GET | `/api/privesc/rules` | 提权规则库（`platform=linux\|windows` 可选过滤） | 「提权智能匹配」面板 |
+| POST | `/api/shells/{id}/privesc/scan` | 采集目标事实并匹配提权路径（真实执行、只读，不自动利用） | `privescScan()` |
+| GET / POST / DELETE | `/api/db/connections[...]` | 数据库连接 CRUD；`/test` 连通测试、`/query` 执行 SQL、`/tables` 库表列表 | 数据库面板 |
+| GET / POST / DELETE | `/api/plugins[...]` | 插件清单（`/plugins`）、安装（`/{id}/install`）、启停（`/{id}/toggle`）、卸载（`DELETE /{id}`） | 插件市场 |
 
 ### 6.2 WebSocket 事件（`/ws`）
 
@@ -384,7 +390,11 @@ TtyFix{id,name,platform,target,needs[],reliability,risk,cmd,note,manual}   # 终
   （`PIVOTHUB_STAGE_BIND` / `PIVOTHUB_STAGE_PORT` / `PIVOTHUB_STAGE_TTL` 可调），只服务
   `/s/<随机 token>/<name>` 路径、条目 15 分钟过期、拉取结束即撤下；目标不可达时如实报错，
   用「自动」通道会自动回退分片直传；
-- 冰蝎/哥斯拉协议（M1-7）、提权 exp 智能匹配（M5-2）为 PRD 二期内容，未包含。
+- **数据库面板**：经会话在目标执行 `mysql` / `psql` / `redis-cli` / `sqlite3` / `sqlcmd`（无需本机驱动），
+  结果解析为表格；本机 SQLite 走 Python 内置模块。密码与凭据库同样明文存储（本机授权场景）；
+- **插件市场**：数据插件（命令库 / 马模板 / 固化技法 / 提权规则），清单默认读 `data/plugins/registry.json`，
+  可用 `PIVOTHUB_PLUGIN_REGISTRY` 指向远程清单；安装后并入对应视图，停用即撤下（不执行第三方代码）；
+- 冰蝎/哥斯拉协议（M1-7）为 PRD 二期内容，未包含。
 
 ---
 
