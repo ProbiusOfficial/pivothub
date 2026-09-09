@@ -9,40 +9,30 @@
 
 ## 1. 快速开始
 
-### 方式 A：本地静态服务（推荐）
+### 启动（后端一体化托管前端）
 
 ```bash
-# 任意静态服务器，任选其一
-python -m http.server 8777
-# 或
-npx serve -l 8777
+pip install -r requirements.txt
+python run.py            # 等价 python -m pivothub，监听 127.0.0.1:8000
 ```
 
-浏览器打开 **http://127.0.0.1:8777/** 即可。
-
-### 方式 B：直接双击
-
-直接双击 `index.html` 也能运行（脚本均为相对路径，Vue/ECharts 走 CDN）。
-若浏览器限制本地文件加载，请改用方式 A。
+浏览器打开 **http://127.0.0.1:8000/** 即可 —— 后端以 StaticFiles 原样托管前端，
+`/api/*` 与 `/ws` 同源，无需另起静态服务器。
 
 > 首次打开会弹出**合规声明**弹窗（PRD §5 合规要求），点击确认后进入面板。
+> 数据全部来自本地后端（SQLite）；后端不可用时界面显式报错，不用假数据兜底。
 
-### 离线环境（比赛断网场景）
+### 前端资源已本地化（离线可用）
 
-CDN 不可达时，把两个库下载到本地并替换 `index.html` 底部引用：
+`index.html` 引用的是 `assets/vendor/` 下的 Vue 3 与 ECharts，**不依赖 CDN**，断网环境可直接使用；
+ECharts 缺失时仅拓扑图降级，其余界面不受影响（`app.js` 另有 Vue 加载失败提示）。
 
-```bash
-mkdir -p assets/vendor
-curl -o assets/vendor/vue.global.prod.js  https://unpkg.com/vue@3.4.38/dist/vue.global.prod.js
-curl -o assets/vendor/echarts.min.js      https://unpkg.com/echarts@5.5.1/dist/echarts.min.js
-```
+### 纯前端调试
 
-```html
-<script src="assets/vendor/vue.global.prod.js"></script>
-<script src="assets/vendor/echarts.min.js"></script>
-```
-
-`app.js` 已内置 Vue 加载失败提示，ECharts 缺失时仅拓扑图降级，其余界面不受影响。
+若只想调试界面，可用任意静态服务器打开本目录（如 `python -m http.server 8777`）；
+但该端口没有 `/api` 与 `/ws`，面板会显式提示后端不可用。`.verify/` 自动化脚本默认目标是
+正在运行的后端（`cdp-test.js` / `proxy-test.js` 用 `PH_URL` 覆盖，默认 `http://127.0.0.1:8033/`；
+其余脚本写死 `http://127.0.0.1:8777/`）。
 
 ---
 
@@ -50,26 +40,37 @@ curl -o assets/vendor/echarts.min.js      https://unpkg.com/echarts@5.5.1/dist/e
 
 ```
 supershell/
-├─ index.html                     # 骨架 + 全部 Vue 模板（<script type="text/x-template">）
+├─ index.html                     # 前端骨架 + 全部 Vue 模板（<script type="text/x-template">）
+├─ run.py  requirements.txt       # 一键启动 / 后端依赖
+├─ pivothub/                      # 后端包（FastAPI + SQLite + WebSocket）
+│  ├─ app.py  config.py  db.py  util.py  localinfo.py
+│  ├─ api/                        # 路由层：projects hosts shells links creds flags
+│  │                              #   timeline export recon stage tools attack
+│  ├─ service/                    # 服务层：probe tty relay filestage recon
+│  │                              #   statlib export timeline
+│  ├─ session/                    # 会话层：base http_shell local reverse registry
+│  ├─ adapters/                   # 适配器：chisel（已接入）+ base / registry 占位
+│  ├─ models/  schemas/           # SQLAlchemy 模型 / Pydantic 接口契约
+│  └─ ws/                         # WebSocket 连接管理
+├─ assets/
+│  ├─ css/                        # theme.css 设计令牌 · layout.css · components.css
+│  ├─ vendor/                     # Vue 3 + ECharts 本地化（离线可用）
+│  └─ js/
+│     ├─ api.js                   # 后端 REST + WebSocket 客户端
+│     ├─ store.js                 # 全局 store：状态 + 派生数据 + 全部业务动作
+│     ├─ icons.js  topology.js  app.js  components/common.js
+│     └─ views/                   # dashboard shell recon files generator proxy
+│                                 #   asset cred flag timeline cheat export reverse
+├─ data/                          # 插件数据：commands payloads tty_fixes seed_project
+├─ tests/                         # 后端 pytest 用例
+├─ scripts/                       # 靶场 Compose / 联调 / 防火墙脚本
+├─ tools/                         # chisel / fscan 二进制（Adapter 部署与内网扫描用）
+├─ .verify/                       # Chrome Headless + CDP 自动化测试脚本
+├─ docs/                          # 架构 / 计划 / 进展 / 验证文档 + screenshots/
+├─ 多层内网渗透辅助工具-产品设计文档.md   # PRD v1.0
 ├─ README.md
-├─ docs/screenshots/              # 界面截图（各视图一张）
-├─ 多层内网渗透辅助工具-产品设计文档.md
-└─ assets/
-   ├─ css/
-   │  ├─ theme.css                # 设计令牌（暗色黑客风配色 / 字体 / 圆角）
-   │  ├─ layout.css               # 外壳布局与各视图骨架
-   │  └─ components.css           # 按钮/表单/徽标/表格/终端/固化面板/弹窗/Toast
-   └─ js/
-      ├─ api.js                   # 后端 REST + WebSocket 客户端
-      ├─ store.js                 # 全局 store：状态 + 派生数据 + 全部业务动作
-      ├─ icons.js                 # 内联 SVG 图标库
-      ├─ topology.js              # 拓扑视图（ECharts Graph，三种布局）
-      ├─ app.js                   # 应用入口：注册组件、挂载
-      ├─ components/common.js     # Toast 层 / 通用弹窗层
-      └─ views/
-         ├─ dashboard.js  shell.js  recon.js  files.js  generator.js  proxy.js
-         ├─ asset.js  cred.js  flag.js  timeline.js
-         └─ cheat.js  export.js
+├─ PROJECT-STATUS.md  HANDOFF.md  PACKAGE-MANIFEST.md
+└─ .gitignore
 ```
 
 **约定**：模板集中在 `index.html`（便于阅读与 IDE 高亮），逻辑按视图拆分在 `assets/js/views/`，每个文件通过 `global.Components['xxx-view'] = {...}` 注册，`app.js` 统一挂载。
@@ -205,11 +206,12 @@ CTF / 靶场里拿到的绝大多数是**基于 Web 应用 RCE 落地的 WebShel
 
 ---
 
-## 6. 后端对接契约（FastAPI + WebSocket）
+## 6. 后端接口契约（FastAPI + WebSocket）
 
-界面逻辑全部收敛在 `PivotStore`（`assets/js/store.js`）。接后端时**只需替换该文件中各动作的函数体**，视图层无需改动。
+界面逻辑全部收敛在 `PivotStore`（`assets/js/store.js`），数据一律来自后端（无 mock 回退）。
+下表即**当前已实现**的接口（`pivothub/api/`，共 57 个端点），字段契约以 `pivothub/schemas/` 为准。
 
-### 6.1 REST 建议
+### 6.1 REST 接口
 
 | 方法 | 路径 | 说明 | 对应 store 动作 |
 |---|---|---|---|
@@ -264,7 +266,7 @@ CTF / 靶场里拿到的绝大多数是**基于 Web 应用 RCE 落地的 WebShel
 | POST | `/api/timeline/notes` | 添加笔记 | `addNote()` |
 | GET | `/api/export?format=md\|html\|json` | 导出 | `buildMarkdown()` |
 
-### 6.2 WebSocket 事件（建议 `/ws`）
+### 6.2 WebSocket 事件（`/ws`）
 
 后端主动推送，前端按 `type` 分派即可实现实时刷新：
 
@@ -343,7 +345,10 @@ TtyFix{id,name,platform,target,needs[],reliability,risk,cmd,note,manual}   # 终
 - 凭据复用推荐输出 5 条、Flag 墙 6 张卡片、导出 Markdown 4679 字、JSON 预览正常；
 - 12 个视图**无横向溢出**，1680×1050 与窄屏断点均正常。
 
-复跑：`node .verify/cdp-test.js`、`node .verify/deep-test.js`、`node .verify/tty-test.js`（需先起 8777 静态服务）。
+复跑：`node .verify/cdp-test.js`、`node .verify/deep-test.js`、`node .verify/tty-test.js`。
+先启动后端（面板自带 `/api` 与 `/ws`）：`cdp-test.js` / `proxy-test.js` 用 `PH_URL` 指向它
+（默认 `http://127.0.0.1:8033/`）；其余脚本写死 `http://127.0.0.1:8777/`，可先以
+`PIVOTHUB_PORT=8777 python run.py` 让后端监听该端口再跑。
 
 ---
 

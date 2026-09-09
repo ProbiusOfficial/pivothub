@@ -1,72 +1,50 @@
-# 打包清单（PACKAGE MANIFEST）
+# 仓库清单（REPOSITORY MANIFEST）
 
-> 生成时间：2026-09-09
-> 文件数：48 · 总大小：约 3.8 MB
-> 校验：SHA256 前 12 位
+> 更新时间：2026-09-09
+> 跟踪文件：**200 个 / 约 42.2 MB**（`git ls-files` 实测）
+> 说明：本文件由早期「前端交付包清单（48 文件 / 3.8 MB，含已删除的 `mock.js`）」更新为当前全栈仓库清单。
+> 不再逐文件列 SHA256 —— git 本身即内容寻址（`git ls-files -s`、`git hash-object <file>`），
+> 手工维护的哈希清单会随下一次提交立即过期。
 
-| 路径 | 大小 | SHA256(前12) |
-|---|---|---|
-| .verify/cdp-test.js | 7.4 KB | 7BB4517450D8 |
-| .verify/deep-test.js | 10.1 KB | 23CCE9CD8A33 |
-| .verify/inject-test.js | 6.9 KB | 483168188ABE |
-| .verify/layout-test.js | 6.4 KB | D3B9255200F1 |
-| .verify/modal-test.js | 7.2 KB | 68540B31C5DA |
-| .verify/proxy-test.js | 12.5 KB | 5BBF25EDFB50 |
-| .verify/shots.js | 4.3 KB | 8BB4484F4953 |
-| .verify/tty-test.js | 8.7 KB | 6561DF6FBE93 |
-| assets/css/components.css | 17.2 KB | B27E1D80EA68 |
-| assets/css/layout.css | 21.1 KB | AEFDCC127282 |
-| assets/css/theme.css | 3.6 KB | ED294C84AD8C |
-| assets/js/api.js | 2.5 KB | DE80372CB36B |
-| assets/js/app.js | 1.6 KB | E30EE012ABD0 |
-| assets/js/components/common.js | 0.9 KB | 5802E83CF727 |
-| assets/js/icons.js | 4.1 KB | 2D319F457667 |
-| assets/js/mock.js | 30.2 KB | 72BC37685CDC |
-| assets/js/store.js | 59.0 KB | 4E57026C547B |
-| assets/js/topology.js | 12.2 KB | 49CFE3B2F99A |
-| assets/js/views/asset.js | 2.9 KB | 6C2F172206E2 |
-| assets/js/views/cheat.js | 2.7 KB | 3F0C0E73094F |
-| assets/js/views/cred.js | 4.3 KB | C0E0F44B34C9 |
-| assets/js/views/dashboard.js | 2.0 KB | E10B64DF85C3 |
-| assets/js/views/export.js | 3.5 KB | C1FEB423E1AA |
-| assets/js/views/flag.js | 1.8 KB | E281FF8A460B |
-| assets/js/views/generator.js | 7.2 KB | 3A3FED93A877 |
-| assets/js/views/proxy.js | 27.1 KB | 39EC5DD622BE |
-| assets/js/views/shell.js | 9.3 KB | A462ADF4A0D5 |
-| assets/js/views/timeline.js | 1.6 KB | 22143F02004D |
-| assets/vendor/echarts.min.js | 1006.7 KB | E84270BD0CD5 |
-| assets/vendor/vue.global.prod.js | 143.4 KB | B50EEEFE35D4 |
-| docs/screenshots/00-启动合规声明.png | 160.1 KB | 7E92393268AB |
-| docs/screenshots/01-阶段看板.png | 170.3 KB | B7BF3ACB26FC |
-| docs/screenshots/02-网络拓扑.png | 227.0 KB | 3C0186BC488E |
-| docs/screenshots/03-Shell管理.png | 176.5 KB | 48864A99A8BB |
-| docs/screenshots/03b-终端固化弹窗.png | 232.2 KB | A11369B450DC |
-| docs/screenshots/04-代理编排台.png | 196.4 KB | 90A45C2117C7 |
-| docs/screenshots/05-马生成器.png | 176.8 KB | 63C97F9553F3 |
-| docs/screenshots/06-主机清单.png | 179.6 KB | 2DC9A7504B93 |
-| docs/screenshots/07-凭据库.png | 183.4 KB | B444F6290596 |
-| docs/screenshots/08-Flag收集墙.png | 117.5 KB | B9C43ACD41E6 |
-| docs/screenshots/09-操作时间线.png | 160.0 KB | D55364EA8D40 |
-| docs/screenshots/10-命令速查.png | 158.9 KB | 71ADF4B51AF6 |
-| docs/screenshots/11-复盘导出.png | 136.3 KB | 568F8F1BFDFB |
-| HANDOFF.md | 6.2 KB | 4573BAACF75B |
-| index.html | 78.7 KB | 59A53F12BBAF |
-| PROJECT-STATUS.md | 6.0 KB | 60DAC0354F89 |
-| README.md | 19.4 KB | 36FE8B8789BD |
-| 多层内网渗透辅助工具-产品设计文档.md | 23.0 KB | 6C18EFBB8131 |
+---
 
-## 与上一版后端的合并说明
+## 1. 目录构成
 
-本包以前端为基线，已合入上一版后端的以下改动：
+| 目录 | 文件数 | 大小 | 说明 |
+|---|---:|---:|---|
+| `pivothub/` | 62 | 0.3 MB | 后端包：`api/`(14) · `models/`(8) · `schemas/`(12) · `service/`(9) · `session/`(6) · `adapters/`(4) · `ws/`(2) + `app.py` / `config.py` / `db.py` / `util.py` / `localinfo.py` |
+| `assets/` | 24 | 1.4 MB | 前端：`css/`(3) · `js/`(19，含 13 个 views) · `vendor/`(2：Vue 3 + ECharts 本地化) |
+| `docs/` | 23 | 2.3 MB | 9 篇文档 + `evidence-round3.json` + `screenshots/`(13 张界面截图) |
+| `.verify/` | 39 | 5.4 MB | 8 个 CDP 自动化脚本 + 31 张验证截图 |
+| `tests/` | 16 | 0.1 MB | pytest 用例（当前 134 passed） |
+| `scripts/` | 12 | < 0.1 MB | 靶场 Compose、联调 / 防火墙脚本 |
+| `data/` | 11 | < 0.1 MB | 命令库、payload 模板、终端固化技法、种子项目 |
+| `tools/` | 4 | 34.7 MB | chisel / fscan 二进制（Adapter 部署与内网扫描用） |
+| 根目录 | 9 | 0.2 MB | `index.html` · `README.md` · PRD · 三份交接文档 · `requirements.txt` · `run.py` · `.gitignore` |
 
-| 合入项 | 来源 | 说明 |
-|---|---|---|
-| `assets/js/api.js` | 后端 | REST + WS 客户端（指数退避重连） |
-| `assets/vendor/*` | 后端 | Vue / ECharts 本地化，离线可用 |
-| `store.js`（60 KB） | 后端 | API 优先 + mock 回退，含 `applyState/refreshState/handleWsEvent/readFile/writeFile/uploadFile/createProject/saveNodePos` |
-| `index.html` 脚本引用 | 后端 | `api.js` + `vendor` 两行 |
-| 「＋ 新建」按钮 | 后端 | 顶栏项目选择器旁，`@click="createProject"` |
-| `topology.js` 拖拽上报 | 后端 | `S.saveNodePos()` + 服务端位置恢复 watch |
-| `shell.js` 文件钩子 | 后端 | `openFile/saveFile/upload` 的 apiMode 分支 |
+---
 
-前端 UI 与逻辑以本包为权威；后端仓库中的旧版前端**已被本包取代**。
+## 2. 未入库内容（见 `.gitignore`）
+
+| 排除项 | 原因 |
+|---|---|
+| `pivothub.db` / `-shm` / `-wal` | 运行时 SQLite（WAL），由 `data/seed_project.json` 播种 |
+| `__pycache__/`、`.pytest_cache/` | 缓存 |
+| `_work/`、`_audit/`、`_pkg/` | 本地工作副本 / 审计快照 / 打包产物（各含一份完整重复代码） |
+| `other/*.7z`、`pivothub-frontend-baseline-*.zip` | 归档文件 |
+| `%TEMP%/` | 环境变量展开错误产生的空目录 |
+
+---
+
+## 3. 大文件
+
+最大文件为 `tools/` 下的 4 个二进制（8.4–9.7 MB），均远低于 GitHub 100 MB 单文件上限：
+
+| 文件 | 大小 | 用途 |
+|---|---:|---|
+| `tools/chisel.exe` | 9.3 MB | chisel 服务端（Windows 攻击机） |
+| `tools/chisel_linux` | 8.9 MB | chisel 客户端（Linux 目标） |
+| `tools/fscan.exe` | 8.4 MB | fscan v2.2.1（Windows 目标内网扫描） |
+| `tools/fscan_linux` | 8.1 MB | fscan v2.2.1（Linux 目标内网扫描） |
+
+`fscan` 二进制的 sha256 与官方 release `checksums.txt` 一致（见 `README.md` §9）。
