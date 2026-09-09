@@ -209,7 +209,7 @@ CTF / 靶场里拿到的绝大多数是**基于 Web 应用 RCE 落地的 WebShel
 ## 6. 后端接口契约（FastAPI + WebSocket）
 
 界面逻辑全部收敛在 `PivotStore`（`assets/js/store.js`），数据一律来自后端（无 mock 回退）。
-下表即**当前已实现**的接口（`pivothub/api/`，共 57 个端点），字段契约以 `pivothub/schemas/` 为准。
+下表即**当前已实现**的接口（`pivothub/api/`，共 58 个端点），字段契约以 `pivothub/schemas/` 为准。
 
 ### 6.1 REST 接口
 
@@ -217,6 +217,7 @@ CTF / 靶场里拿到的绝大多数是**基于 Web 应用 RCE 落地的 WebShel
 |---|---|---|---|
 | GET | `/api/projects` | 项目列表 | `state.projects` |
 | POST | `/api/projects` | 新建项目（干净工作区：仅攻击端本机节点，IP 取当前 `attack.ip`） | `createProject()` |
+| DELETE | `/api/projects/{id}` | 删除项目（级联清理该项目的资产 / 会话 / 链路 / 凭据 / Flag / 时间线；至少保留一个项目） | `deleteProject()` |
 | GET | `/api/projects/{id}/state` | 一次性拉取项目全量状态（`attack` / `segments` / hosts/links/shells/creds/flags/timeline） | `init()` |
 | GET | `/api/attack` | 读攻击机网络 `{ip,segment,iface,note}` | `state.attack` |
 | PUT | `/api/attack` | 写攻击机网络（所有回连命令与链路地址的唯一来源） | `saveAttack()` / 顶栏「全局设置」 |
@@ -268,21 +269,25 @@ CTF / 靶场里拿到的绝大多数是**基于 Web 应用 RCE 落地的 WebShel
 
 ### 6.2 WebSocket 事件（`/ws`）
 
-后端主动推送，前端按 `type` 分派即可实现实时刷新：
+后端主动推送，前端按 `type` 分派即可实现实时刷新（完整清单见 `docs/ARCHITECTURE.md` §2）：
 
 ```json
-{ "type": "shell.beat",   "shellId": "s-1", "alive": true, "latency": 24 }
-{ "type": "shell.output", "shellId": "s-1", "line": "uid=33(www-data)" }
-{ "type": "shell.tty",    "shellId": "s-1", "mode": "full", "hasPty": true, "term": "xterm-256color" }
-{ "type": "probe.result", "hostId": "h-l1-01", "probe": "TCP", "ok": true, "ms": 87 }
-{ "type": "attack.updated","attack": { "ip": "192.0.2.10", "segment": "192.0.2.0/24", "iface": "tun0" } }
-{ "type": "tools.updated", "tools": [ { "name": "chisel", "status": "online", "enabled": true } ] }
-{ "type": "link.state",   "linkId": "p-3", "status": "alive", "latency": 118, "traffic": "42.7 MB" }
-{ "type": "link.created","link": { "...": "ProxyLink" } }
-{ "type": "host.found",   "host": { "...": "Host" } }
-{ "type": "cred.found",   "cred": { "...": "Credential" } }
-{ "type": "timeline.push","event": { "...": "TimelineEvent" } }
-{ "type": "ws.online",    "online": true }
+{ "type": "shell.beat",     "shellId": "s-1", "alive": true, "latency": 24 }
+{ "type": "shell.output",   "shellId": "s-1", "kind": "out", "line": "uid=33(www-data)" }
+{ "type": "shell.tty",      "shellId": "s-1", "mode": "full", "hasPty": true, "term": "xterm-256color" }
+{ "type": "shell.created",  "shell": { "...": "Shell" } }
+{ "type": "probe.result",   "hostId": "h-l1-01", "probe": "TCP", "ok": true, "ms": 87 }
+{ "type": "recon.scan",     "jobId": "scan-1", "status": "running", "kind": "out", "line": "..." }
+{ "type": "attack.updated", "attack": { "ip": "192.0.2.10", "segment": "192.0.2.0/24", "iface": "tun0" } }
+{ "type": "tools.updated",  "tools": [ { "name": "chisel", "status": "online", "enabled": true } ] }
+{ "type": "link.state",     "linkId": "p-3", "status": "alive", "latency": 118, "traffic": "42.7 MB" }
+{ "type": "link.created",   "link": { "...": "ProxyLink" } }
+{ "type": "link.removed",   "linkId": "p-3", "projectId": "proj-1" }
+{ "type": "host.found",     "host": { "...": "Host" } }
+{ "type": "host.removed",   "hostId": "h-2", "projectId": "proj-1", "shellIds": [] }
+{ "type": "timeline.push",  "event": { "...": "TimelineEvent" } }
+{ "type": "project.removed","projectId": "proj-9" }
+{ "type": "ws.online",      "online": true }
 ```
 
 顶栏「WS 已连接/断开」指示器已接 `state.ws.online`。

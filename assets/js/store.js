@@ -540,7 +540,7 @@
     toast('终端已关闭', 'info');
   }
 
-  /* ---------- 交互能力检测（MS2 起服务端真实执行；501 时回退演示） ---------- */
+  /* ---------- 交互能力检测（服务端真实执行；失败按 reason 归因） ---------- */
   function detectTty() {
     const s = activeShell();
     if (!s) { toast('请先选择一个 Shell 会话', 'err'); return; }
@@ -570,7 +570,7 @@
         });
       return;
     }
-
+    toast('后端不可用：请先启动 python -m pivothub', 'err');
   }
   /* 应用服务端检测结论（M1-8 契约：caps/mode/probeLines/summary；事件由服务端入库） */
   function applyDetectResult(s, out) {
@@ -1592,6 +1592,30 @@
       .catch(() => toast('创建失败：后端不可达', 'err'));
   }
 
+  /* 删除项目（用户显式入口）：确认后级联删除服务端数据，并切到剩余第一个项目。
+     至少保留一个项目（服务端同样有保护）。 */
+  function deleteProject() {
+    if (!hasApi) { toast('后端不可用：请先启动 python -m pivothub', 'err'); return; }
+    const p = state.projects.find((x) => x.id === state.projectId);
+    if (!p) return;
+    if (state.projects.length <= 1) { toast('至少保留一个项目：请先新建项目再删除', 'err'); return; }
+    if (!window.confirm('删除项目「' + p.name + '」？\n\n该项目的资产 / 会话 / 链路 / 凭据 / Flag / 时间线将一并删除，且不可恢复。')) return;
+    PivotAPI.del('/api/projects/' + encodeURIComponent(p.id))
+      .then((out) => {
+        const rest = state.projects.filter((x) => x.id !== p.id);
+        replaceArr(state.projects, rest);
+        state.projectId = rest[0].id; /* 触发 watch → 整包重载该项目 */
+        const extra = [];
+        if (out && out.hosts) extra.push(out.hosts + ' 台主机');
+        if (out && out.shells) extra.push(out.shells + ' 个会话');
+        if (out && out.links) extra.push(out.links + ' 条链路');
+        if (out && out.creds) extra.push(out.creds + ' 条凭据');
+        if (out && out.flags) extra.push(out.flags + ' 个 Flag');
+        toast('已删除项目：' + p.name + (extra.length ? '（连带 ' + extra.join(' / ') + '）' : ''), 'ok');
+      })
+      .catch(() => toast('删除失败：后端不可达，或该项目不允许删除', 'err'));
+  }
+
   /* ---------- 导出 ---------- */
   function buildMarkdown(opt) {
     const p = state.project;
@@ -1797,6 +1821,14 @@
         }
         break;
       }
+      case 'project.removed': {
+        if (!msg.projectId) break;
+        replaceArr(state.projects, state.projects.filter((p) => p.id !== msg.projectId));
+        if (state.projectId === msg.projectId && state.projects.length) {
+          state.projectId = state.projects[0].id; /* 触发 watch 重新加载 */
+        }
+        break;
+      }
       case 'ws.online': state.ws.online = msg.online !== false; break;
       case 'tools.updated': {
         if (Array.isArray(msg.tools)) replaceArr(state.tools, msg.tools);
@@ -1855,7 +1887,7 @@
     addHost, removeHost, importScan, addCred, addFlag, addNote,
     buildMarkdown, init, toggleTimer, rid, sleep,
     saveNodePos, refreshState, isApiMode: () => apiMode,
-    readFile, saveFileEdit, closeFileEdit, uploadFile, pickAndUpload, createProject,
+    readFile, saveFileEdit, closeFileEdit, uploadFile, pickAndUpload, createProject, deleteProject,
     uploadMode, setUploadMode, uploadModeText, detectPullTools,
   };
 })(window);

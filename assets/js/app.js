@@ -102,6 +102,7 @@
         navBadge: S.navBadge,
         toggleTimer: S.toggleTimer,
         createProject: S.createProject,
+        deleteProject: S.deleteProject,
         gcfg, openGlobalSettings, detectLocalIp, saveGlobalSettings,
         fileEdit: S.fileEdit, saveFileEdit: S.saveFileEdit, closeFileEdit: S.closeFileEdit,
       };

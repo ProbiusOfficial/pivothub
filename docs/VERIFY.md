@@ -38,7 +38,7 @@ PY scripts/e2e_ms1_console.py
 
 ```bash
 PY -m pytest tests/test_state_api.py -q -p no:warnings
-# 覆盖：state 顶层键与 mock.js 同构 / hosts、links 契约字段 / segments 聚合 /
+# 覆盖：state 顶层键与前端契约同构 / hosts、links 契约字段 / segments 聚合 /
 #       position 持久化与回读 / hosts.import 去重
 PY - <<'EOF'
 import json, urllib.request

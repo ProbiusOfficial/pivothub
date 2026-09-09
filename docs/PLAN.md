@@ -1,6 +1,11 @@
 # PivotHub（链透中枢）后端实现计划
 
-> 依据：PRD v1.0 > README §6 契约 > `assets/js/mock.js` 字段 > 原型现有实现。
+> **本文为第 1 轮计划原文（2026-09-08），保留作历史记录。** 其中「mock.js 权威 / 失败回退 mock /
+> 一期实现 frp+chisel+Neo-reGeorg」等描述已被后续实现取代：mock.js 已于第 4 轮移除，
+> 当前数据契约以 `pivothub/schemas/` 为准，代理工具仅 chisel 接入。
+> 现状请以 `README.md`、`PROJECT-STATUS.md`、`docs/ARCHITECTURE.md` 为准。
+
+> 依据：PRD v1.0 > README §6 契约 > 后端 schemas 字段 > 原型现有实现。
 > 技术栈锁定：Python 3.10+ / FastAPI + Uvicorn + WebSocket / SQLAlchemy 2.x + SQLite / Pydantic v2 / pytest + httpx / Playwright(e2e)。前端保持 Vue 3 CDN 原型零构建。
 > 面板仅监听 `127.0.0.1:8000`（与原型侧栏「后端 127.0.0.1:8000」硬编码一致），无需认证。
 

@@ -3,7 +3,7 @@
 > 更新时间：2026-09-09
 > 形态：**前端原型 + FastAPI 后端（全栈）**——数据落 SQLite，命令执行 / 文件读写 / 出网探测 / 终端固化
 > 全部走真实会话层，后端不可用时前端显式报错，**不用假数据兜底**（`assets/js/mock.js` 已于第 4 轮移除）。
-> 后端回归：`pytest tests/ -q -p no:warnings` → **134 passed**（2026-09-09 本机实测）。
+> 后端回归：`pytest tests/ -q -p no:warnings` → **137 passed**（2026-09-09 本机实测）。
 > 前端回归：`.verify/` 12 视图 0 错误 0 警告（`README.md` §8 记录，本轮未复跑）。
 
 ---
@@ -21,7 +21,7 @@ PRD 的 M1–M6 主体已实现并跑通：WebShell 会话管理、虚拟终端�
 | 层 | 位置 | 现状 |
 |---|---|---|
 | 前端 | `index.html` + `assets/` | Vue 3（CDN）+ ECharts 5，零构建；12 个导航视图 + `views/reverse.js` 反弹引导视图 |
-| API | `pivothub/api/` | FastAPI，**57 个端点**：projects / hosts / shells / links / creds / flags / timeline / export / recon / stage / tools / attack / netinfo |
+| API | `pivothub/api/` | FastAPI，**58 个端点**：projects / hosts / shells / links / creds / flags / timeline / export / recon / stage / tools / attack / netinfo |
 | 服务层 | `pivothub/service/` | 出网探测、终端固化、文件暂存双通道、链路编排、资产探测、统计、导出、时间线 |
 | 会话层 | `pivothub/session/` | 命令执行与文件读写的**唯一出口**：HTTP 马 / 本地进程 / 反弹通道 |
 | 适配器 | `pivothub/adapters/` | **仅 chisel 已接入**；frp / nps / Neo-reGeorg / EW / Stowaway / Venom / ligolo-ng 为占位（`data/meta.json` 标 `offline`，面板不可启用） |
@@ -56,8 +56,9 @@ PRD 的 M1–M6 主体已实现并跑通：WebShell 会话管理、虚拟终端�
 
 | 项 | 命令 / 来源 | 结果 |
 |---|---|---|
-| 后端全量回归 | `pytest tests/ -q -p no:warnings` | **134 passed**（398s，2026-09-09 本机实测） |
+| 后端全量回归 | `pytest tests/ -q -p no:warnings` | **137 passed**（403s，2026-09-09 本机实测） |
 | 前端 12 视图 | `node .verify/cdp-test.js`（需 8777 静态服务） | 0 错误 0 警告（`README.md` §8） |
+| 项目删除 E2E | CDP 实测：顶栏「－ 删除」→ confirm → 级联删除 → 自动切换 | PASS（临时库，12 视图复跑 0 错误） |
 | 端到端 | `.verify/deep-test.js` · `tty-test.js` · `proxy-test.js` 等 8 个脚本 | 见 `README.md` §8 |
 | 仓库规模 | `PACKAGE-MANIFEST.md` | 200 文件 / 约 42.2 MB |
 

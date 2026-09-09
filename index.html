@@ -36,6 +36,7 @@
           <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
         </select>
         <button class="btn btn-xs btn-ghost" title="新建项目（干净工作区）" @click="createProject">＋ 新建</button>
+        <button class="btn btn-xs btn-danger" title="删除当前项目（连带其全部数据，不可恢复）" @click="deleteProject">－ 删除</button>
         <span class="badge" :class="'badge-' + (timer.running ? 'ok' : 'idle')">
           {{ timer.running ? '计时中' : '已暂停' }}
         </span>
