@@ -17,8 +17,18 @@
 
       const form = reactive({
         ip: '', hostname: '', os: 'Linux', layer: 'L2',
-        segment: '10.85.101.0/24', privilege: '', services: '', note: '',
+        segment: '', privilege: '', services: '', note: '',
       });
+
+      /* 网段下拉框：已知网段可选，也允许手工输入新网段（空值由后端按 IP 推断） */
+      function onSegmentSelect(v) {
+        if (v === '__custom__') {
+          const cur = window.prompt('输入网段（CIDR，如 10.10.30.0/24）', form.segment || '');
+          if (cur != null) form.segment = cur.trim();
+          return;
+        }
+        form.segment = v;
+      }
 
       const layers = computed(() => S.state.layers || []);
       const filtered = computed(() => {
@@ -82,7 +92,7 @@
         ownedCount, serviceCount, rootCount, scanPreview,
         hosts: S.state.hosts, segments: S.state.segments,
         shellsOf: S.shellsOf, flagsOf: S.flagsOf, privClass: S.privClass,
-        openAdd, save, importScan, doImport, focus, openCred, remove,
+        openAdd, save, importScan, doImport, focus, openCred, remove, onSegmentSelect,
       };
     },
   };

@@ -102,6 +102,40 @@ def interface_names() -> list[str]:
         return []
 
 
+def interfaces() -> list[dict]:
+    """本机 IPv4 网卡快照：[{name, ip, netmask, segment}]，segment 为 CIDR 形式。
+
+    供「全局设置」的网卡 / 网段下拉框使用：选中网卡即带出该网卡的 IP 与所在网段。
+    psutil 缺失时返回空列表，前端退化为手工输入。
+    """
+    out: list[dict] = []
+    try:
+        import psutil
+    except ImportError:
+        return out
+    try:
+        for name, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                if addr.family != socket.AF_INET:
+                    continue
+                ip = str(addr.address or "")
+                mask = str(addr.netmask or "")
+                if not ip or ip.startswith(("127.", "169.254.")):
+                    continue
+                segment = ""
+                if mask:
+                    try:
+                        import ipaddress
+
+                        segment = str(ipaddress.ip_network(f"{ip}/{mask}", strict=False))
+                    except ValueError:
+                        segment = ""
+                out.append({"name": name, "ip": ip, "netmask": mask, "segment": segment})
+    except Exception:  # pragma: no cover - psutil 后端异常时不影响面板启动
+        return []
+    return out
+
+
 def machine() -> dict:
     """本机信息快照：{hostname, os, privilege}。"""
     return {"hostname": hostname(), "os": os_name(), "privilege": privilege()}

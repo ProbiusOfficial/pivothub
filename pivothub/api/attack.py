@@ -18,6 +18,7 @@ from ..schemas import AttackIn, AttackOut
 from ..service import add_event
 from ..ws import manager
 from .deps import get_project
+from ..localinfo import interfaces
 
 router = APIRouter()
 
@@ -70,8 +71,12 @@ def _local_ipv4() -> list[str]:
 
 @router.get("/netinfo")
 def netinfo():
-    """面板所在机器的网络信息（攻击机地址检测；只读，不产生任何连接）。"""
-    return {"hostname": socket.gethostname(), "ips": _local_ipv4()}
+    """面板所在机器的网络信息（攻击机地址检测 + 网卡/网段下拉框；只读，不产生任何连接）。"""
+    return {
+        "hostname": socket.gethostname(),
+        "ips": _local_ipv4(),
+        "interfaces": interfaces(),
+    }
 
 
 @router.get("/attack", response_model=AttackOut)

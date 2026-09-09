@@ -86,6 +86,13 @@ def test_netinfo_returns_local_ipv4(client):
     assert isinstance(data.get("hostname"), str)
     assert isinstance(data.get("ips"), list)
     assert all(not ip.startswith("127.") for ip in data["ips"])
+    # 网卡/网段下拉框数据源：每项含 name/ip/segment（psutil 缺失时为空列表）
+    ifaces = data.get("interfaces")
+    assert isinstance(ifaces, list)
+    for it in ifaces:
+        assert set(it) >= {"name", "ip", "segment"}
+        assert it["name"] and it["ip"]
+        assert not it["ip"].startswith(("127.", "169.254."))
 
 
 def test_reverse_listen_connect_register(client, sandbox_project):

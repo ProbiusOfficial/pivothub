@@ -1834,6 +1834,11 @@
         if (Array.isArray(msg.tools)) replaceArr(state.tools, msg.tools);
         break;
       }
+      case 'attack.updated': {
+        /* 其他标签页改了攻击机网络：整份覆盖，本页所有回连命令与链路地址随之同步 */
+        if (msg.attack) Object.assign(state.attack, msg.attack);
+        break;
+      }
       default: break;
     }
   }

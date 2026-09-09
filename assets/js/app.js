@@ -24,8 +24,48 @@
       /* ---------- 全局设置：攻击机网络（面板所在机器就是攻击机） ---------- */
       const gcfg = Vue.reactive({
         ip: '', iface: '', segment: '', note: '',
-        applyAll: true, detecting: false, detected: [],
+        applyAll: true, detecting: false, detected: [], ifaces: [],
       });
+
+      /* 网段候选：本机各网卡所在网段 + 当前项目已知网段（去重） */
+      const gcfgSegments = Vue.computed(() => {
+        const set = new Set();
+        (gcfg.ifaces || []).forEach((it) => { if (it.segment) set.add(it.segment); });
+        (S.state.segments || []).forEach((sg) => { if (sg.segment) set.add(sg.segment); });
+        return [...set];
+      });
+
+      /* 静默拉一次本机网卡列表，供网卡/网段下拉框使用（不覆盖已填的 IP） */
+      function loadIfaces() {
+        S.netinfo().then((out) => {
+          gcfg.ifaces = (out && out.interfaces) || [];
+          gcfg.detected = (out && out.ips) || [];
+        }).catch(() => { /* 后端不可用时保持手工输入 */ });
+      }
+
+      function onIfaceSelect(v) {
+        if (v === '__custom__') {
+          const cur = window.prompt('输入网卡名（如 tun0 / eth0 / WLAN）', gcfg.iface || '');
+          if (cur != null) gcfg.iface = cur.trim();
+          return;
+        }
+        gcfg.iface = v;
+        const hits = (gcfg.ifaces || []).filter((it) => it.name === v);
+        const hit = hits.find((it) => it.ip === gcfg.ip) || hits[0];
+        if (hit) {
+          gcfg.ip = hit.ip;
+          if (hit.segment) gcfg.segment = hit.segment;
+        }
+      }
+
+      function onSegmentSelect(v) {
+        if (v === '__custom__') {
+          const cur = window.prompt('输入网段（CIDR，如 10.0.0.0/24）', gcfg.segment || '');
+          if (cur != null) gcfg.segment = cur.trim();
+          return;
+        }
+        gcfg.segment = v;
+      }
 
       function openGlobalSettings() {
         const a = S.state.attack || {};
@@ -34,8 +74,10 @@
         gcfg.segment = a.segment || '';
         gcfg.note = a.note || '';
         gcfg.detected = [];
+        gcfg.ifaces = [];
         gcfg.applyAll = true;
         S.state.ui.modal = 'global-cfg';
+        loadIfaces();
       }
 
       function detectLocalIp() {
@@ -43,8 +85,14 @@
         S.netinfo().then((out) => {
           gcfg.detecting = false;
           gcfg.detected = (out && out.ips) || [];
+          gcfg.ifaces = (out && out.interfaces) || [];
           if (gcfg.detected.length) {
             gcfg.ip = gcfg.detected[0];
+            const hit = gcfg.ifaces.find((it) => it.ip === gcfg.ip);
+            if (hit) {
+              gcfg.iface = hit.name;
+              if (hit.segment) gcfg.segment = hit.segment;
+            }
             S.toast('已填入本机地址 ' + gcfg.ip + '（共检测到 ' + gcfg.detected.length + ' 个）', 'ok');
           } else {
             S.toast('未检测到非回环 IPv4 地址（请手工填写靶场网络内的地址）', 'warn');
@@ -103,7 +151,8 @@
         toggleTimer: S.toggleTimer,
         createProject: S.createProject,
         deleteProject: S.deleteProject,
-        gcfg, openGlobalSettings, detectLocalIp, saveGlobalSettings,
+        gcfg, gcfgSegments, openGlobalSettings, loadIfaces, onIfaceSelect, onSegmentSelect,
+        detectLocalIp, saveGlobalSettings,
         fileEdit: S.fileEdit, saveFileEdit: S.saveFileEdit, closeFileEdit: S.closeFileEdit,
       };
     },

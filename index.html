@@ -191,13 +191,23 @@
             </label>
             <label class="field">
               <span>网卡 / 接口</span>
-              <input class="input mono" v-model="gcfg.iface" placeholder="如 tun0 / WLAN" />
+              <select class="input mono" :value="gcfg.iface" @change="onIfaceSelect($event.target.value)">
+                <option value="">（未指定）</option>
+                <option v-for="it in gcfg.ifaces" :key="it.name + '@' + it.ip" :value="it.name">{{ it.name }} — {{ it.ip }}</option>
+                <option v-if="gcfg.iface && !gcfg.ifaces.some(i => i.name === gcfg.iface)" :value="gcfg.iface">{{ gcfg.iface }}（当前值）</option>
+                <option value="__custom__">＋ 手动输入…</option>
+              </select>
             </label>
           </div>
           <div class="form-row">
             <label class="field">
               <span>所在网段</span>
-              <input class="input mono" v-model="gcfg.segment" placeholder="如 10.0.0.0/24" />
+              <select class="input mono" :value="gcfg.segment" @change="onSegmentSelect($event.target.value)">
+                <option value="">（未指定）</option>
+                <option v-for="sg in gcfgSegments" :key="sg" :value="sg">{{ sg }}</option>
+                <option v-if="gcfg.segment && !gcfgSegments.includes(gcfg.segment)" :value="gcfg.segment">{{ gcfg.segment }}（当前值）</option>
+                <option value="__custom__">＋ 手动输入…</option>
+              </select>
             </label>
             <label class="field">
               <span>备注</span>
@@ -1705,7 +1715,15 @@
           <label class="field"><span>主机名</span><input class="input" v-model="form.hostname" /></label>
           <label class="field"><span>操作系统</span><input class="input" v-model="form.os" placeholder="Linux / Windows Server 2019" /></label>
           <label class="field"><span>层级</span><select class="input" v-model="form.layer"><option v-for="l in layers" :key="l">{{ l }}</option></select></label>
-          <label class="field"><span>网段</span><input class="input mono" v-model="form.segment" placeholder="10.10.30.0/24" /></label>
+          <label class="field">
+            <span>网段</span>
+            <select class="input mono" :value="form.segment" @change="onSegmentSelect($event.target.value)">
+              <option value="">（按 IP 自动推断）</option>
+              <option v-for="sg in segments" :key="sg.segment" :value="sg.segment">{{ sg.segment }}{{ sg.layer ? ' · ' + sg.layer : '' }}</option>
+              <option v-if="form.segment && !segments.some(s => s.segment === form.segment)" :value="form.segment">{{ form.segment }}（当前值）</option>
+              <option value="__custom__">＋ 手动输入…</option>
+            </select>
+          </label>
           <label class="field"><span>当前权限</span><input class="input" v-model="form.privilege" placeholder="www-data / root / SYSTEM" /></label>
           <label class="field field-full"><span>开放服务（逗号分隔）</span><input class="input mono" v-model="form.services" placeholder="22,80,3306" /></label>
           <label class="field field-full"><span>备注</span><input class="input" v-model="form.note" /></label>
