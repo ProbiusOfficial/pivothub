@@ -23,6 +23,42 @@
       const cat = ref('');
       const ctxHostId = ref(S.state.hosts[5] ? S.state.hosts[5].id : S.state.hosts[0].id);
 
+      /* ---------- 提权智能匹配（M5-2） ---------- */
+      const psShells = computed(() => S.state.shells.filter((s) => s.alive));
+      const psShellId = ref(((S.state.shells.find((s) => s.alive) || S.state.shells[0] || {}).id) || '');
+      const psBusy = ref(false);
+      const psResult = ref(null);
+
+      function privescScan() {
+        const id = psShellId.value || (psShells.value[0] || {}).id;
+        if (!id) { S.toast('没有存活的 Shell 会话', 'err'); return; }
+        psShellId.value = id;
+        psBusy.value = true;
+        S.privescScan(id).then((out) => {
+          psBusy.value = false;
+          if (!out || !out.ok) {
+            S.toast('提权扫描失败：' + ((out && out.error) || '未知原因'), 'err');
+            return;
+          }
+          psResult.value = out;
+          S.toast('提权匹配完成：命中 ' + out.findings.length + ' 条',
+            out.findings.length ? 'ok' : 'info');
+        });
+      }
+
+      function execFinding(f) {
+        const sid = psShellId.value;
+        if (!sid) { S.toast('请先选择会话', 'err'); return; }
+        const cmd = String(f.cmd || '').split(/\r?\n/).filter((l) => l.trim())[0];
+        if (!cmd) return;
+        S.state.ui.selectedShellId = sid;
+        S.termState.inited = false;
+        S.initTerm();
+        S.execCommand(cmd);
+        S.goto('shell');
+        S.toast('已发送到终端：' + f.name, 'ok');
+      }
+
       const commands = computed(() => S.state.commands);
       const categories = computed(() => {
         const map = {};
@@ -65,6 +101,7 @@
       return {
         q, cat, ctxHostId, commands, categories, filtered,
         hosts: S.state.hosts,
+        psShells, psShellId, psBusy, psResult, privescScan, execFinding,
         icon: global.icon,
         render, copy, run,
       };

@@ -1,0 +1,82 @@
+[
+  {
+    "id": "win-system",
+    "name": "当前已是 SYSTEM / 管理员",
+    "platform": "windows",
+    "risk": "低",
+    "reliability": 99,
+    "match": "(?i)nt authority\\\\system",
+    "cmd": "whoami",
+    "note": "已经是 SYSTEM，无需提权；可直接导出 SAM 或抓取凭据。"
+  },
+  {
+    "id": "win-seimpersonate",
+    "name": "SeImpersonatePrivilege（Potato / PrintSpoofer）",
+    "platform": "windows",
+    "risk": "低",
+    "reliability": 90,
+    "match": "SeImpersonatePrivilege[^\\n]*(Enabled|已启用)",
+    "cmd": "whoami /priv",
+    "note": "服务类账户（IIS / MSSQL）常见；用 GodPotato / PrintSpoofer / JuicyPotato 直接 SYSTEM。"
+  },
+  {
+    "id": "win-alwaysinstallelevated",
+    "name": "AlwaysInstallElevated（MSI 提权）",
+    "platform": "windows",
+    "risk": "低",
+    "reliability": 85,
+    "match": "AlwaysInstallElevated\\s+REG_DWORD\\s+0x1",
+    "cmd": "msiexec /quiet /qn /i C:\\temp\\evil.msi",
+    "note": "HKLM 与 HKCU 都为 1 时，任意用户安装 MSI 即以 SYSTEM 运行。"
+  },
+  {
+    "id": "win-seassignprimarytoken",
+    "name": "SeAssignPrimaryTokenPrivilege",
+    "platform": "windows",
+    "risk": "低",
+    "reliability": 80,
+    "match": "SeAssignPrimaryTokenPrivilege[^\\n]*(Enabled|已启用)",
+    "cmd": "whoami /priv",
+    "note": "与 SeImpersonate 配合完成令牌窃取提权。"
+  },
+  {
+    "id": "win-sebackup",
+    "name": "SeBackupPrivilege（备份操作员）",
+    "platform": "windows",
+    "risk": "中",
+    "reliability": 80,
+    "match": "SeBackupPrivilege[^\\n]*(Enabled|已启用)",
+    "cmd": "reg save HKLM\\SAM C:\\temp\\SAM & reg save HKLM\\SYSTEM C:\\temp\\SYSTEM",
+    "note": "可读取任意文件：导出 SAM / SYSTEM 离线抓哈希，或直接复制敏感文件。"
+  },
+  {
+    "id": "win-sedebug",
+    "name": "SeDebugPrivilege",
+    "platform": "windows",
+    "risk": "中",
+    "reliability": 75,
+    "match": "SeDebugPrivilege[^\\n]*(Enabled|已启用)",
+    "cmd": "whoami /priv",
+    "note": "可注入 SYSTEM 进程窃取令牌（mimikatz / procdump lsass）。"
+  },
+  {
+    "id": "win-stored-cred",
+    "name": "凭据管理器存在已保存凭据",
+    "platform": "windows",
+    "risk": "中",
+    "reliability": 70,
+    "match": "(?i)(目标:|Target:)",
+    "cmd": "cmdkey /list",
+    "note": "用 runas /savecred 复用已保存凭据，可能直接拿到管理员上下文。"
+  },
+  {
+    "id": "win-unquoted-service",
+    "name": "服务路径含空格（可能未加引号，可劫持）",
+    "platform": "windows",
+    "risk": "中",
+    "reliability": 55,
+    "match": "(?i)C:\\\\Program Files",
+    "cmd": "wmic service get name,pathname,startmode | findstr /i \"auto\"",
+    "note": "需人工确认路径未加引号且上层目录可写；可写则放置同名 exe 劫持服务。"
+  }
+]

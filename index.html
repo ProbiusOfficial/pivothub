@@ -2010,6 +2010,58 @@
       </div>
     </div>
 
+    <!-- 提权智能匹配（M5-2）：真实采集 → 规则匹配 → 建议命令（需手动执行） -->
+    <div class="panel" style="margin-bottom:14px">
+      <div class="panel-head">
+        <h3>提权智能匹配（M5-2）</h3>
+        <div class="row-gap">
+          <select class="input input-sm" v-model="psShellId" style="width:230px">
+            <option value="">选择会话…</option>
+            <option v-for="s in psShells" :key="s.id" :value="s.id">{{ s.hostname || s.url }} · {{ s.type }}</option>
+          </select>
+          <button class="btn btn-sm btn-primary" :disabled="psBusy" @click="privescScan">
+            {{ psBusy ? '采集中…' : '扫描提权路径' }}
+          </button>
+        </div>
+      </div>
+      <p class="muted tiny">
+        经会话在目标上真实执行只读信息收集（内核 / sudo / SUID / capabilities / cron / 服务权限），
+        按目标平台匹配规则库并给出建议命令。命中只是建议，需要点「发送到终端」才执行。
+      </p>
+      <div v-if="psResult">
+        <div class="row-gap" style="margin:6px 0">
+          <span class="badge badge-info">{{ psResult.platform }}</span>
+          <span class="badge badge-idle" v-if="psResult.facts && psResult.facts.kernel">内核 {{ psResult.facts.kernel }}</span>
+          <span class="badge badge-idle" v-if="psResult.facts && psResult.facts.privilege">权限 {{ psResult.facts.privilege }}</span>
+          <span class="badge" :class="psResult.findings.length ? 'badge-warn' : 'badge-ok'">命中 {{ psResult.findings.length }} 条</span>
+        </div>
+        <table class="table" v-if="psResult.findings.length">
+          <thead>
+            <tr><th>提权路径</th><th style="width:60px">风险</th><th style="width:70px">可靠性</th><th>命中证据</th><th style="width:150px">操作</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="f in psResult.findings" :key="f.id">
+              <td>
+                <div>{{ f.name }}</div>
+                <div class="muted tiny">{{ f.note }}</div>
+                <pre class="code-block code-sm" style="margin-top:4px"><code>{{ f.cmd }}</code></pre>
+              </td>
+              <td>
+                <span class="badge" :class="f.risk === '低' ? 'badge-ok' : (f.risk === '高' ? 'badge-err' : 'badge-warn')">{{ f.risk }}</span>
+              </td>
+              <td class="mono">{{ f.reliability }}%</td>
+              <td class="mono tiny">{{ f.evidence || '（按系统事实匹配）' }}</td>
+              <td>
+                <button class="btn btn-xs" @click="copy(f.cmd)">复制</button>
+                <button class="btn btn-xs btn-primary" @click="execFinding(f)">发送到终端</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="muted tiny" v-else>未命中规则库中的提权路径（可展开下方原始回显人工分析）。</p>
+      </div>
+    </div>
+
     <div class="cheat-layout">
       <aside class="cheat-cats">
         <button class="nav-item" :class="{ 'is-active': cat === '' }" @click="cat = ''">全部命令 <span class="nav-badge mono">{{ commands.length }}</span></button>

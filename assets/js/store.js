@@ -1313,6 +1313,19 @@
     return PivotAPI.del('/api/shells/reverse/listeners').catch(() => ({ ok: false, closed: 0 }));
   }
 
+  /* ---------- 提权智能匹配（M5-2） ---------- */
+  function privescRules(platform) {
+    if (!hasApi) return Promise.resolve({ rules: [] });
+    return PivotAPI.get('/api/privesc/rules' + (platform ? '?platform=' + encodeURIComponent(platform) : ''))
+      .catch(() => ({ rules: [] }));
+  }
+
+  function privescScan(shellId) {
+    if (!hasApi) return Promise.resolve({ ok: false, error: '后端不可用（请启动 python -m pivothub）' });
+    return PivotAPI.post('/api/shells/' + encodeURIComponent(shellId) + '/privesc/scan', {})
+      .catch(() => ({ ok: false, error: '后端不可达' }));
+  }
+
   /* 在指定会话上执行命令（不改变当前终端选择）；模块化流程用 */
   function execOn(shellId, cmd) {
     if (!hasApi) return Promise.resolve({ ok: false, error: '后端不可用（请启动 python -m pivothub）' });
@@ -1895,7 +1908,8 @@
     fileStateFor, cwdPath, refreshFileEntries, cdInto, cdTo, cdUp, cdIndex, fileEdit, downloadFile,
     testLink, restartLink, stopLink, removeLink,
     saveAttack, saveAttackFor, netinfo, saveTools, deployLink, relayPlan, probeShell,
-    reverseListen, reverseListeners, reverseRestoreListeners, reverseRegister, reverseCloseListener, reverseCloseAll, execOn,
+    reverseListen, reverseListeners, reverseRestoreListeners, reverseRegister, reverseCloseListener, reverseCloseAll,
+    privescRules, privescScan, execOn,
     reconScanStream, reconScanJob, reconScanCancel,
     addHost, removeHost, importScan, addCred, addFlag, addNote,
     buildMarkdown, init, toggleTimer, rid, sleep,
