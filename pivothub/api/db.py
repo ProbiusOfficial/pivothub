@@ -91,14 +91,8 @@ def db_delete(conn_id: str, db: DBSession = Depends(get_db)):
     return {"deleted": conn_id}
 
 
-def _exec(db: DBSession, c: DbConnection, sql: str) -> dict:
-    """执行 SQL：sqlite + 本机 → Python 内置；其余经会话层客户端命令。"""
-    if c.kind == "sqlite" and not c.shell_id:
-        res = dbclient.run_sqlite_local(c.host, sql)
-        return {**res, "cmd": f"sqlite3 {c.host} {sql!r}", "ms": 0}
-    if not c.shell_id:
-        return {"columns": [], "rows": [], "error": "该类型需要指定一个会话（或改用 sqlite 本机路径）",
-                "cmd": "", "ms": 0}
+def _exec_via_session(db: DBSession, c: DbConnection, sql: str, timeout: float = 60.0) -> dict:
+    """经会话执行客户端命令：优先 base64 回传（中文不乱码），目标无 base64 时退回明文。"""
     from .shells import _get_shell, _open_session
 
     s = _get_shell(db, c.shell_id)
@@ -108,11 +102,26 @@ def _exec(db: DBSession, c: DbConnection, sql: str) -> dict:
         return {"columns": [], "rows": [], "error": str(e), "cmd": "", "ms": 0}
     cmd = dbclient.build_command(c.kind, c.host, c.port, c.username, c.password,
                                  c.db_name, sql)
-    r = sess.exec(cmd, timeout=60)
-    parsed = dbclient.parse_result(c.kind, r.output)
-    if parsed["error"] and r.error and not parsed["error"]:
+    r = sess.exec(dbclient.wrap_b64(cmd), timeout=timeout)
+    text = dbclient.try_decode_b64(r.output)
+    if text is None:  # 目标没有 base64（或输出不是 base64）：退回明文
+        r = sess.exec(cmd, timeout=timeout)
+        text = r.output
+    parsed = dbclient.parse_result(c.kind, text)
+    if not parsed["error"] and r.error and not r.ok and not parsed["rows"]:
         parsed["error"] = r.error
     return {**parsed, "cmd": cmd, "ms": r.ms}
+
+
+def _exec(db: DBSession, c: DbConnection, sql: str) -> dict:
+    """执行 SQL：sqlite + 本机 → Python 内置；其余经会话层客户端命令。"""
+    if c.kind == "sqlite" and not c.shell_id:
+        res = dbclient.run_sqlite_local(c.host, sql)
+        return {**res, "cmd": f"sqlite3 {c.host} {sql!r}", "ms": 0}
+    if not c.shell_id:
+        return {"columns": [], "rows": [], "error": "该类型需要指定一个会话（或改用 sqlite 本机路径）",
+                "cmd": "", "ms": 0}
+    return _exec_via_session(db, c, sql)
 
 
 @router.post("/db/connections/{conn_id}/test")
@@ -138,6 +147,54 @@ def db_query(conn_id: str, form: DbQueryIn, db: DBSession = Depends(get_db)):
     if out["error"]:
         return JSONResponse({"ok": False, **out})
     return {"ok": True, **out}
+
+
+@router.get("/db/connections/{conn_id}/schema")
+def db_schema(conn_id: str, db: DBSession = Depends(get_db)):
+    """自动探测数据库结构：库 → 表 → 列（类型 / 可空 / 主键 / 行数估计）。"""
+    c = _get(db, conn_id)
+    if c.kind == "sqlite" and not c.shell_id:
+        tree = dbclient.run_sqlite_schema_local(c.host)
+        return {"ok": True, "kind": c.kind, "databases": tree, "ms": 0,
+                "sql": "sqlite_master + PRAGMA table_info"}
+    if not c.shell_id:
+        return JSONResponse({"ok": False, "kind": c.kind, "databases": [],
+                             "error": "该类型需要指定一个会话（或改用 sqlite 本机路径）"})
+
+    if c.kind == "sqlite":  # 远程 sqlite：先列表，再逐表 PRAGMA
+        sql0 = ("SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        parsed = _exec_via_session(db, c, sql0, timeout=30)
+        if parsed["error"]:
+            return JSONResponse({"ok": False, "kind": c.kind, "databases": [],
+                                 "error": parsed["error"]})
+        tables = []
+        for row in parsed["rows"]:
+            tname = (row[0] if row else "").strip()
+            if not tname:
+                continue
+            p2 = _exec_via_session(db, c, f'PRAGMA table_info("{tname}")', timeout=30)
+            cols = []
+            for c2 in p2["rows"]:  # cid|name|type|notnull|dflt|pk
+                if len(c2) >= 6:
+                    cols.append({"name": c2[1], "type": c2[2],
+                                 "nullable": c2[3] in ("0", ""),
+                                 "key": "PRI" if c2[5] not in ("0", "") else ""})
+            tables.append({"name": tname, "rows": 0, "columns": cols})
+        return {"ok": True, "kind": c.kind, "databases": [{"name": "main", "tables": tables}],
+                "ms": parsed.get("ms", 0), "sql": "sqlite_master + PRAGMA table_info"}
+
+    sql = dbclient.SCHEMA_SQL.get(c.kind)
+    if not sql:
+        return JSONResponse({"ok": False, "kind": c.kind, "databases": [],
+                             "error": f"暂不支持探测 {c.kind} 结构"})
+    parsed = _exec_via_session(db, c, sql, timeout=45)
+    if parsed["error"]:
+        return JSONResponse({"ok": False, "kind": c.kind, "databases": [],
+                             "error": parsed["error"], "cmd": parsed.get("cmd", "")})
+    return {"ok": True, "kind": c.kind,
+            "databases": dbclient.build_schema_from_rows(c.kind, parsed["rows"]),
+            "ms": parsed.get("ms", 0), "sql": sql}
 
 
 @router.get("/db/connections/{conn_id}/tables")

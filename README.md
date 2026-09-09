@@ -211,7 +211,7 @@ CTF / 靶场里拿到的绝大多数是**基于 Web 应用 RCE 落地的 WebShel
 ## 6. 后端接口契约（FastAPI + WebSocket）
 
 界面逻辑全部收敛在 `PivotStore`（`assets/js/store.js`），数据一律来自后端（无 mock 回退）。
-下表即**当前已实现**的接口（`pivothub/api/`，共 71 个端点），字段契约以 `pivothub/schemas/` 为准。
+下表即**当前已实现**的接口（`pivothub/api/`，共 72 个端点），字段契约以 `pivothub/schemas/` 为准。
 
 ### 6.1 REST 接口
 
@@ -390,8 +390,12 @@ TtyFix{id,name,platform,target,needs[],reliability,risk,cmd,note,manual}   # 终
   （`PIVOTHUB_STAGE_BIND` / `PIVOTHUB_STAGE_PORT` / `PIVOTHUB_STAGE_TTL` 可调），只服务
   `/s/<随机 token>/<name>` 路径、条目 15 分钟过期、拉取结束即撤下；目标不可达时如实报错，
   用「自动」通道会自动回退分片直传；
-- **数据库面板**：经会话在目标执行 `mysql` / `psql` / `redis-cli` / `sqlite3` / `sqlcmd`（无需本机驱动），
-  结果解析为表格；本机 SQLite 走 Python 内置模块。密码与凭据库同样明文存储（本机授权场景）；
+- **数据库面板**：选中连接即**自动探测结构**（库 → 表 → 列，含类型 / 主键 / 可空 / 行数），点表名直接
+  预览数据；命令经会话在目标执行 `mysql` / `psql` / `redis-cli` / `sqlite3` / `sqlcmd`（无需本机驱动），
+  回显优先 **base64 回传**（避免 WebShell 通道字符集把中文变成 `?`，目标无 base64 时自动退回明文），
+  本机 SQLite 走 Python 内置模块。密码与凭据库同样明文存储（本机授权场景）；
+- **Shell 管理 · 一键提权**：终端面板底部一键执行「采集事实 → 匹配规则库 → 执行最可信路径」，
+  命中结果与执行命令都会打印在虚拟终端里；
 - **插件市场**：数据插件（命令库 / 马模板 / 固化技法 / 提权规则），清单默认读 `data/plugins/registry.json`，
   可用 `PIVOTHUB_PLUGIN_REGISTRY` 指向远程清单；安装后并入对应视图，停用即撤下（不执行第三方代码）；
 - 冰蝎/哥斯拉协议（M1-7）为 PRD 二期内容，未包含。

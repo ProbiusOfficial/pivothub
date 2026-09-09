@@ -514,10 +514,17 @@
                   placeholder="输入命令，Tab 补全，↑↓ 翻历史" />
               </div>
             </div>
-            <!-- 命令提示条：固定在本面板最底部 -->
+            <!-- 一键提权：采集事实 → 匹配规则库 → 执行最可信路径（替代原「可试」提示条） -->
             <div class="term-hints">
-              <span class="muted">可试：</span>
-              <button class="chip" v-for="c in hintCommands" :key="c" @click="termInput = c; focusTerm()">{{ c }}</button>
+              <button class="btn btn-xs btn-primary" :disabled="privescBusy || !activeShell" @click="oneClickPrivesc">
+                {{ privescBusy ? '提权中…' : '⚡ 一键提权' }}
+              </button>
+              <span class="muted tiny" v-if="privescResult && privescResult.length">
+                命中 {{ privescResult.length }} 条 · 首选：{{ privescResult[0].name }}（{{ privescResult[0].reliability }}%）
+              </span>
+              <span class="muted tiny" v-else>
+                自动采集内核 / sudo / SUID / capabilities / 服务权限，执行最可信提权路径
+              </span>
             </div>
           </div>
         </div>
@@ -2100,7 +2107,7 @@
     <div class="view-head">
       <div>
         <h2>数据库面板</h2>
-        <p class="muted">经会话在目标上执行客户端命令（mysql / psql / redis-cli / sqlite3 / sqlcmd），结果表格可视化；本机 SQLite 直接读文件</p>
+        <p class="muted">选中连接即自动探测结构（库 → 表 → 列），点表名直接预览数据；命令经会话在目标执行，本机 SQLite 直接读文件</p>
       </div>
       <div class="view-head-actions">
         <button class="btn btn-sm btn-primary" @click="openForm">＋ 新建连接</button>
@@ -2108,7 +2115,7 @@
     </div>
 
     <div class="db-layout">
-      <div class="panel">
+      <div class="panel db-col">
         <div class="panel-head">
           <h3>连接</h3>
           <span class="muted tiny">{{ conns.length }} 个</span>
@@ -2126,7 +2133,51 @@
         </div>
       </div>
 
-      <div>
+      <!-- ② 结构树：选中连接即自动探测（库 → 表 → 列） -->
+      <div class="panel db-col db-tree">
+        <div class="panel-head">
+          <h3>结构</h3>
+          <span class="row-gap">
+            <span class="muted tiny" v-if="schemaMs">{{ tableCount }} 表 · {{ schemaMs }}ms</span>
+            <button class="btn btn-xs" :disabled="!active || schemaBusy" @click="loadSchema">{{ schemaBusy ? '探测中…' : '刷新' }}</button>
+          </span>
+        </div>
+        <p class="muted tiny" v-if="!active">先选择一个连接</p>
+        <p class="muted tiny" v-else-if="schemaBusy">正在探测库 / 表 / 列结构…</p>
+        <p class="muted tiny" v-else-if="schemaError">探测失败：{{ schemaError }}</p>
+        <div v-for="db in schema" :key="db.name" class="tree-db">
+          <div class="tree-row" @click="toggleDb(db.name)">
+            <svg class="ico" viewBox="0 0 24 24" v-html="icon('database')"></svg>
+            <span class="grow mono">{{ db.name }}</span>
+            <span class="badge badge-idle">{{ db.tables.length }} 表</span>
+          </div>
+          <template v-if="expandedDbs[db.name]">
+            <div v-for="t in db.tables" :key="t.name">
+              <div class="tree-row tree-table"
+                   :class="{ 'is-active': activeTable === db.name + '.' + t.name }"
+                   @click="openTable(db.name, t)">
+                <svg class="ico" viewBox="0 0 24 24" v-html="icon('server')"></svg>
+                <span class="grow mono">{{ t.name }}</span>
+                <span class="badge badge-idle" v-if="t.rows">{{ t.rows }} 行</span>
+                <span class="badge badge-idle" v-else>{{ t.columns.length }} 列</span>
+              </div>
+              <div v-if="expandedTables[db.name + '.' + t.name]" class="tree-cols">
+                <div class="tree-col" v-for="c in t.columns" :key="c.name">
+                  <span class="grow mono">{{ c.name }}</span>
+                  <span class="muted tiny mono">{{ c.type }}</span>
+                  <span class="badge badge-warn" v-if="c.key === 'PRI'">PK</span>
+                  <span class="badge badge-idle" v-if="!c.nullable">NN</span>
+                </div>
+                <p class="muted tiny" v-if="!t.columns.length">（无列信息）</p>
+              </div>
+            </div>
+          </template>
+        </div>
+        <p class="muted tiny" v-if="active && !schemaBusy && !schemaError && !schema.length">未探测到表结构</p>
+      </div>
+
+      <!-- ③ 查询与结果 -->
+      <div class="db-main">
         <div class="panel" v-if="showForm" style="margin-bottom:12px">
           <div class="panel-head"><h3>新建数据库连接</h3></div>
           <div class="form-row">
@@ -2165,7 +2216,10 @@
 
         <div class="panel">
           <div class="panel-head">
-            <h3>{{ active ? active.name : '选择左侧连接' }}</h3>
+            <h3>
+              {{ active ? active.name : '选择左侧连接' }}
+              <span class="muted tiny" v-if="activeTable"> · {{ activeTable }}</span>
+            </h3>
             <div class="row-gap">
               <button class="btn btn-xs" :disabled="!active" @click="quick('SELECT 1')">SELECT 1</button>
               <button class="btn btn-xs" :disabled="!active" @click="listTables">库 / 表列表</button>

@@ -1366,6 +1366,11 @@
     return PivotAPI.get('/api/db/connections/' + encodeURIComponent(id) + '/tables')
       .catch(() => ({ ok: false, error: '后端不可达' }));
   }
+  function dbSchema(id) {
+    if (!hasApi) return Promise.resolve({ ok: false, databases: [], error: '后端不可用' });
+    return PivotAPI.get('/api/db/connections/' + encodeURIComponent(id) + '/schema')
+      .catch(() => ({ ok: false, databases: [], error: '后端不可达' }));
+  }
 
   /* ---------- 提权智能匹配（M5-2） ---------- */
   function privescRules(platform) {
@@ -1963,7 +1968,7 @@
     testLink, restartLink, stopLink, removeLink,
     saveAttack, saveAttackFor, netinfo, saveTools, deployLink, relayPlan, probeShell,
     reverseListen, reverseListeners, reverseRestoreListeners, reverseRegister, reverseCloseListener, reverseCloseAll,
-    dbList, dbCreate, dbDelete, dbTest, dbQuery, dbTables,
+    dbList, dbCreate, dbDelete, dbTest, dbQuery, dbTables, dbSchema,
     pluginsList, pluginInstall, pluginToggle, pluginUninstall,
     privescRules, privescScan, execOn,
     reconScanStream, reconScanJob, reconScanCancel,

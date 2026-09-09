@@ -2,7 +2,7 @@
 
 > 更新时间：2026-09-09
 > 本仓库是 **前端原型 + FastAPI 后端的全栈基线**（早期「纯前端交付包」版本已作废）。
-> 后端回归 `pytest tests/ -q -p no:warnings` → **153 passed**；接口契约已在代码中落地，不再有「待补字段」清单。
+> 后端回归 `pytest tests/ -q -p no:warnings` → **157 passed**；接口契约已在代码中落地，不再有「待补字段」清单。
 
 ---
 
@@ -64,7 +64,7 @@
 
 ```bash
 pip install -r requirements.txt
-pytest tests/ -q -p no:warnings        # 153 passed
+pytest tests/ -q -p no:warnings        # 157 passed
 python run.py                          # 127.0.0.1:8000，后端托管前端
 ```
 

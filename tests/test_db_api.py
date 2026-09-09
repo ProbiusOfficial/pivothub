@@ -82,3 +82,70 @@ def test_build_command_and_parse():
     redis_out = "1) \"a\"\n2) \"b\""
     parsed = dbclient.parse_result("redis", redis_out)
     assert parsed["columns"] == ["result"] and len(parsed["rows"]) == 2
+
+
+def test_build_schema_from_rows():
+    """结构查询回显 → 库/表/列树（含主键与行数）。"""
+    from pivothub.service.dbclient import build_schema_from_rows
+
+    rows = [
+        ["app", "users", "id", "int", "NO", "PRI", "12"],
+        ["app", "users", "name", "varchar(64)", "YES", "", "12"],
+        ["app", "logs", "msg", "text", "YES", "", "0"],
+    ]
+    tree = build_schema_from_rows("mysql", rows)
+    assert [d["name"] for d in tree] == ["app"]
+    assert [t["name"] for t in tree[0]["tables"]] == ["logs", "users"]
+    users = next(t for t in tree[0]["tables"] if t["name"] == "users")
+    assert users["rows"] == 12 and len(users["columns"]) == 2
+    assert users["columns"][0]["key"] == "PRI"
+    assert users["columns"][1]["nullable"] is True
+
+    redis_tree = build_schema_from_rows("redis", [["k1"], ["k2"]])
+    assert redis_tree[0]["tables"][0]["name"] == "k1"
+
+
+def test_b64_wrap_and_decode():
+    """base64 回传：中文经 WebShell 通道不再被替换成 `?`。"""
+    from pivothub.service import dbclient
+
+    cmd = dbclient.build_command("mysql", "h", 3306, "u", "p", "", "SELECT 1")
+    wrapped = dbclient.wrap_b64(cmd)
+    assert wrapped.count("2>&1") == 1 and wrapped.endswith("tr -d '\\r\\n'")
+
+    import base64 as b64
+
+    raw = "title\n滨湖新区管廊工程竣工图纸\n2026 年上半年度安全巡查报告\n"
+    out = "noise before\n" + b64.b64encode(raw.encode()).decode() + "\ntrailing"
+    assert dbclient.try_decode_b64(out) == raw
+
+    # 目标没有 base64（回显是明文错误）→ 返回 None，调用方退回明文
+    assert dbclient.try_decode_b64("base64: command not found") is None
+    assert dbclient.try_decode_b64("") is None
+
+
+def test_sqlite_schema_local(client, sandbox_project, tmp_path):
+    """本机 SQLite 自动探测：库/表/列 + 主键 + 行数。"""
+    db_file = tmp_path / "s.db"
+    con = sqlite3.connect(db_file)
+    con.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, note TEXT)")
+    con.execute("INSERT INTO users (name) VALUES ('a')")
+    con.commit()
+    con.close()
+
+    cid = client.post("/api/db/connections", json={
+        "projectId": sandbox_project, "name": "schema sqlite", "kind": "sqlite",
+        "host": str(db_file),
+    }).json()["id"]
+
+    r = client.get(f"/api/db/connections/{cid}/schema").json()
+    assert r["ok"] is True
+    db = r["databases"][0]
+    assert db["name"] == "main"
+    t = next(x for x in db["tables"] if x["name"] == "users")
+    assert t["rows"] == 1
+    cols = {c["name"]: c for c in t["columns"]}
+    assert cols["id"]["key"] == "PRI"
+    assert cols["name"]["nullable"] is False and cols["note"]["nullable"] is True
+
+    client.delete(f"/api/db/connections/{cid}")

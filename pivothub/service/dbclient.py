@@ -81,6 +81,36 @@ def _split_pipe(text: str) -> tuple[list[str], list[list[str]]]:
         [c.strip() for c in ln.split("|")] for ln in lines[1:]]
 
 
+#: 经 WebShell 通道取回中文时的编码加固：目标侧 base64 成纯 ASCII 再回传，
+#: 避免管道 / PTY 的 locale 把 UTF-8 中文替换成 `?`（tr 兼容 busybox）。
+B64_SUFFIX = " 2>&1 | base64 | tr -d '\\r\\n'"
+
+
+def wrap_b64(cmd: str) -> str:
+    """把命令包成 base64 回传形式（去掉原有的 2>&1，避免重复重定向）。"""
+    base = cmd[:-5] if cmd.endswith(" 2>&1") else cmd
+    return base + B64_SUFFIX
+
+
+def try_decode_b64(output: str) -> str | None:
+    """从回显里取出 base64 段并解码；不像 base64（目标没有 base64 命令）时返回 None。"""
+    import base64 as _b64
+    import re as _re
+
+    runs = _re.findall(r"[A-Za-z0-9+/=]{8,}", output or "")
+    if not runs:
+        return None
+    text = max(runs, key=len)
+    try:
+        raw = _b64.b64decode(text + "=" * (-len(text) % 4))
+    except Exception:
+        return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("utf-8", "replace")
+
+
 #: 常见客户端错误前缀（命中即视为失败，把原文交给用户）
 _ERROR_HINTS = (
     "ERROR", "error:", "FATAL", "Access denied", "Unknown database", "no such table",
@@ -128,5 +158,100 @@ def run_sqlite_local(path: str, sql: str) -> dict[str, Any]:
         return {"columns": cols, "rows": rows, "error": ""}
     except sqlite3.Error as e:
         return {"columns": [], "rows": [], "error": str(e)}
+    finally:
+        con.close()
+
+
+# ---------------------------------------------------------------------------
+# 结构探测（数据库面板的「自动探测 + 结构树」）
+# ---------------------------------------------------------------------------
+
+#: 各类数据库统一列顺序的结构查询：db / table / column / type / nullable / key / rows
+SCHEMA_SQL = {
+    "mysql": (
+        "SELECT c.table_schema AS db, c.table_name AS tbl, c.column_name AS col, "
+        "c.column_type AS typ, c.is_nullable AS nullable, c.column_key AS ckey, "
+        "COALESCE(t.table_rows, 0) AS rows "
+        "FROM information_schema.columns c "
+        "LEFT JOIN information_schema.tables t "
+        "ON t.table_schema = c.table_schema AND t.table_name = c.table_name "
+        "WHERE c.table_schema NOT IN "
+        "('mysql','information_schema','performance_schema','sys') "
+        "ORDER BY c.table_schema, c.table_name, c.ordinal_position"
+    ),
+    "postgres": (
+        "SELECT c.table_schema AS db, c.table_name AS tbl, c.column_name AS col, "
+        "c.data_type AS typ, c.is_nullable AS nullable, '' AS ckey, 0 AS rows "
+        "FROM information_schema.columns c "
+        "WHERE c.table_schema NOT IN ('pg_catalog','information_schema') "
+        "ORDER BY c.table_schema, c.table_name, c.ordinal_position"
+    ),
+    "mssql": (
+        "SELECT c.TABLE_SCHEMA AS db, c.TABLE_NAME AS tbl, c.COLUMN_NAME AS col, "
+        "c.DATA_TYPE AS typ, c.IS_NULLABLE AS nullable, '' AS ckey, 0 AS rows "
+        "FROM INFORMATION_SCHEMA.COLUMNS c "
+        "ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION"
+    ),
+    "redis": "KEYS *",
+}
+
+
+def build_schema_from_rows(kind: str, rows: list[list[str]]) -> list[dict]:
+    """把统一列顺序的结构查询结果整理成「库 → 表 → 列」树。"""
+    kind = (kind or "mysql").lower()
+    if kind == "redis":
+        keys = [r[0] for r in rows if r and r[0]]
+        return [{"name": "db0", "tables": [{"name": k, "rows": 0, "columns": []} for k in keys]}]
+
+    dbs: dict[str, dict] = {}
+    for r in rows:
+        if len(r) < 5:
+            continue
+        db, tbl, col, typ = (r[0] or ""), (r[1] or ""), (r[2] or ""), (r[3] or "")
+        nullable = str(r[4] or "").upper() in ("YES", "TRUE", "1")
+        key = (r[5] if len(r) > 5 else "") or ""
+        try:
+            row_count = int(float(r[6])) if len(r) > 6 and r[6] not in (None, "") else 0
+        except (TypeError, ValueError):
+            row_count = 0
+        if not db or not tbl:
+            continue
+        db_node = dbs.setdefault(db, {"name": db, "tables": {}})
+        tbl_node = db_node["tables"].setdefault(tbl, {"name": tbl, "rows": row_count, "columns": []})
+        if row_count:
+            tbl_node["rows"] = max(tbl_node["rows"], row_count)
+        if col:
+            tbl_node["columns"].append({"name": col, "type": typ, "nullable": nullable, "key": key})
+    out = []
+    for db in sorted(dbs.values(), key=lambda x: x["name"]):
+        tables = sorted(db["tables"].values(), key=lambda x: x["name"])
+        out.append({"name": db["name"], "tables": tables})
+    return out
+
+
+def run_sqlite_schema_local(path: str) -> list[dict]:
+    """本机 sqlite 结构：sqlite_master + PRAGMA table_info + 每表行数。"""
+    import sqlite3
+
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return []
+    try:
+        tables = [r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name").fetchall()]
+        out_tables = []
+        for t in tables:
+            try:
+                count = con.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
+            except sqlite3.Error:
+                count = 0
+            cols = []
+            for cid, name, ctype, notnull, dflt, pk in con.execute(f'PRAGMA table_info("{t}")').fetchall():
+                cols.append({"name": name, "type": ctype or "", "nullable": not bool(notnull),
+                             "key": "PRI" if pk else ""})
+            out_tables.append({"name": t, "rows": int(count or 0), "columns": cols})
+        return [{"name": "main", "tables": out_tables}]
     finally:
         con.close()

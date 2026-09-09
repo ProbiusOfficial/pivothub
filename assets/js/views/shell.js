@@ -197,6 +197,47 @@
       }
       function isApplied(id) { return S.isTtyApplied(id); }
 
+      /* ---------- 一键提权（M5-2）：采集事实 → 选最可信路径 → 直接执行 ---------- */
+      const privescBusy = ref(false);
+      const privescResult = ref(null);
+
+      function oneClickPrivesc() {
+        const s = activeShell.value;
+        if (!s) { S.toast('请先选择一个 Shell 会话', 'err'); return; }
+        if (!s.alive) { S.toast('会话已断线：请先点「测试」确认可达', 'err'); return; }
+        if (privescBusy.value) return;
+        privescBusy.value = true;
+        privescResult.value = null;
+        S.termPush('warn', S.escapeHtml('[*] 一键提权：采集系统信息并匹配提权路径…'));
+        scrollTerm();
+        S.privescScan(s.id).then((out) => {
+          privescBusy.value = false;
+          if (!out || !out.ok) {
+            const why = (out && out.error) || '未知原因';
+            S.termPush('err', S.escapeHtml('[!] 提权采集失败：' + why));
+            S.toast('提权扫描失败：' + why, 'err');
+            return;
+          }
+          const findings = out.findings || [];
+          privescResult.value = findings;
+          if (!findings.length) {
+            const f = out.facts || {};
+            S.termPush('warn', S.escapeHtml('[*] 未命中规则库中的提权路径（内核 ' +
+              (f.kernel || '?') + ' · 权限 ' + (f.privilege || '?') + '）'));
+            S.toast('未发现可用的提权路径', 'warn');
+            return;
+          }
+          const top = findings[0];
+          S.termPush('ok', S.escapeHtml('[*] 命中 ' + findings.length + ' 条，执行最可信路径：' +
+            top.name + '（' + top.reliability + '%）'));
+          const cmd = String(top.cmd || '').split(/\r?\n/).filter((l) => l.trim())[0];
+          S.termPush('dim', S.escapeHtml('$ ' + cmd));
+          S.execCommand(cmd);
+          scrollTerm();
+          S.toast('一键提权：已执行「' + top.name + '」', 'ok');
+        });
+      }
+
       return {
         ui, termEl, termInputEl, termInput, termState, activeTerm: termState, file, form, activeShell,
         shells: S.state.shells, hosts: S.state.hosts,
@@ -210,6 +251,7 @@
         openAdd, testForm, save, test, remove, heartbeatAll, latencyClass,
         fixFilter, fixes, appliedList, ttyMode, ps1,
         detectTty, applyFix, finishTty, copyFix, sendFix, isApplied, fixCmdText,
+        privescBusy, privescResult, oneClickPrivesc,
       };
     },
   };

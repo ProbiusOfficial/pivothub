@@ -126,8 +126,9 @@ class HttpShellSession(SessionBase):
 
     def _parse_exec(self, body: str, ms: int) -> ExecResult:
         if self.lang in ("jsp", "aspx", "asp"):
-            # 这些形态直接回显命令输出
-            return ExecResult(ok=bool(body.strip()), output=body.strip(), ms=ms)
+            # 这些形态直接回显命令输出：空回显是合法的（重定向、touch 等无输出命令），
+            # 请求本身失败会走 SessionError，因此这里按成功处理。
+            return ExecResult(ok=True, output=body.strip(), ms=ms)
         if EOF_MARK not in body:
             return ExecResult(
                 ok=False, ms=ms,
