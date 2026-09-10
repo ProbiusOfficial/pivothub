@@ -1,7 +1,7 @@
 # 仓库清单（REPOSITORY MANIFEST）
 
 > 更新时间：2026-09-10
-> 跟踪文件：**230 个 / 约 113.5 MB**（`git ls-files` + `docs/screenshots/` 实测）
+> 跟踪文件：**231 个 / 约 113.5 MB**（`git ls-files` + `docs/screenshots/` 实测）
 > 说明：本文件由早期「前端交付包清单（48 文件 / 3.8 MB，含已删除的 `mock.js`）」更新而来；
 > 已随仓库清理移除过时的自动化测试脚本与旧截图（`.verify/` 等，见 git 历史）。
 > 不再逐文件列 SHA256 —— git 本身即内容寻址（`git ls-files -s`、`git hash-object <file>`），
@@ -20,7 +20,7 @@
 | `scripts/` | 10 | < 0.1 MB | 靶场 Compose（`lab/`）· Windows 防火墙放行脚本 |
 | `data/` | 15 | < 0.1 MB | 命令库、payload 模板、终端固化技法、提权规则、插件清单、种子项目 |
 | `tools/` | 18 | 104.5 MB | chisel / frp / fscan 二进制与 Neo-reGeorg 模板（Adapter 部署与内网扫描用） |
-| 根目录 | 9 | 0.2 MB | `index.html` · `README.md` · PRD · 三份交接文档 · `requirements.txt` · `run.py` · `.gitignore` |
+| 根目录 | 10 | 0.2 MB | `index.html` · `README.md` · `LICENSE` · PRD · 三份交接文档 · `requirements.txt` · `run.py` · `.gitignore` |
 
 ---
 

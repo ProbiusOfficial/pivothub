@@ -139,7 +139,7 @@ supershell/
 ├─ tools/                         # chisel / frpc / frps / fscan 等二进制（适配器部署与扫描用）
 ├─ docs/                          # 架构 / 计划 / 进展 / 验证文档 + screenshots/（界面截图）
 ├─ 多层内网渗透辅助工具-产品设计文档.md   # PRD v1.0
-├─ README.md  HANDOFF.md  PROJECT-STATUS.md  PACKAGE-MANIFEST.md
+├─ README.md  LICENSE  HANDOFF.md  PROJECT-STATUS.md  PACKAGE-MANIFEST.md
 └─ .gitignore
 ```
 
@@ -502,3 +502,13 @@ cd scripts/lab && docker compose up -d --build
 | `PROJECT-STATUS.md` | 当前状态速览 |
 | `PACKAGE-MANIFEST.md` | 仓库清单（目录构成 / 大文件 / 未入库内容） |
 | `docs/screenshots/` | 本 README 使用的界面截图（演示数据） |
+
+---
+
+## 12. 许可证（License）
+
+本项目采用 [MIT License](LICENSE) 发布。
+
+> 许可证仅覆盖本项目代码。请在**授权场景**下使用（见 §10 合规声明）：
+> 使用者需自行确保对目标环境的测试授权，并自行承担合规责任。
+
