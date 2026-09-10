@@ -77,8 +77,8 @@ mock 的 SEGMENTS 仅 3 条（不含 LOCAL），但 hosts 含 isLocal 攻击端�
 ## A-12 Chrome 不可用时的浏览器验收
 
 本机（当前环境）无 Chrome，Edge 152 headless 无法启动（Multiple targets 错误）。
-**决策**：浏览器验收与 e2e 统一使用 Playwright Chromium（`playwright install chromium`），
-`scripts/ms1_console_check.js` 保留 Chrome/Edge 自动探测作为备选。
+**决策**：浏览器验收统一使用 Playwright Chromium（`playwright install chromium`）；
+当时的 Chrome/Edge 自动探测辅助脚本已随仓库清理移除，结论保留。
 
 ## A-13 shell.js 增加三个纯数据流钩子（文件读/写/上传）
 

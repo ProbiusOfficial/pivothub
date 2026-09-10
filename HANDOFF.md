@@ -1,8 +1,8 @@
 # 交接说明（HANDOFF）— 接续开发从这里开始
 
-> 更新时间：2026-09-09
+> 更新时间：2026-09-10
 > 本仓库是 **前端原型 + FastAPI 后端的全栈基线**（早期「纯前端交付包」版本已作废）。
-> 后端回归 `pytest tests/ -q -p no:warnings` → **157 passed**；接口契约已在代码中落地，不再有「待补字段」清单。
+> 后端回归 `pytest tests/ -q -p no:warnings` → **223 passed**（2026-09-10 实测）；接口契约已在代码中落地，不再有「待补字段」清单。
 
 ---
 
@@ -26,7 +26,8 @@
   前端消费侧在 `assets/js/store.js`，视图层不改数据来源。
 - **命令执行与文件读写只走 `pivothub/session/`**：API 层不出现 `subprocess`。
 - **面板仅监听 `127.0.0.1`**：`pivothub/config.py` 有断言，属合规硬约束，不要放宽。
-- **UI 结构与样式已通过自动化测试**：改动后必须复跑 `.verify/` 脚本（需先起 8777 静态服务）。
+- **前端回归**：改动后在浏览器逐视图复跑（重点：拓扑拖拽 / 终端固化 / 链路部署 / 探测弹窗 / 导出），控制台保持 0 错误；
+  后端以 `pytest tests/ -q -p no:warnings` 全绿为准入门槛。早期 `.verify/` CDP 脚本已随仓库清理移除，需要时可从 git 历史取回。
 - **凭据 / 口令 / Flag 明文显示是有意设计**（`docs/ASSUMPTIONS.md` A-23）：面板仅面向本机授权场景；
   对外分享 Writeup / 导出 JSON 前请自行删减敏感信息。
 
@@ -64,19 +65,14 @@
 
 ```bash
 pip install -r requirements.txt
-pytest tests/ -q -p no:warnings        # 157 passed
+pytest tests/ -q -p no:warnings        # 223 passed
 python run.py                          # 127.0.0.1:8000，后端托管前端
 ```
 
-前端自动化（另开一个静态服务，面板与脚本分离）：
+前端回归（人工，浏览器逐视图）：
 
-```bash
-python -m http.server 8777
-node .verify/cdp-test.js      # 12 视图 + 弹窗，断言 0 错误
-node .verify/deep-test.js     # 探测 / 部署 / 终端 / 文件 / 导入 / 导出
-node .verify/tty-test.js      # 终端固化全流程
-node .verify/proxy-test.js    # 三种链路类型 / 多级中继 / 攻击机设置 / 探测弹窗
-```
+打开 `http://127.0.0.1:8000/`，逐视图点击并观察控制台 0 错误；
+重点复跑拓扑拖拽、终端固化、链路部署、探测弹窗、复盘导出。
 
 靶场：`scripts/lab/`（Docker Compose，含 JSP / PHP 马与 Linux 靶机）。
 

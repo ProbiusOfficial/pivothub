@@ -1,10 +1,10 @@
 # PivotHub · 链透中枢 — 项目状态（PROJECT STATUS）
 
-> 更新时间：2026-09-09
+> 更新时间：2026-09-10
 > 形态：**前端原型 + FastAPI 后端（全栈）**——数据落 SQLite，命令执行 / 文件读写 / 出网探测 / 终端固化
 > 全部走真实会话层，后端不可用时前端显式报错，**不用假数据兜底**（`assets/js/mock.js` 已于第 4 轮移除）。
-> 后端回归：`pytest tests/ -q -p no:warnings` → **157 passed**（2026-09-09 本机实测）。
-> 前端回归：`.verify/` 12 视图 0 错误 0 警告（`README.md` §8 记录，本轮未复跑）。
+> 后端回归：`pytest tests/ -q -p no:warnings` → **223 passed**（2026-09-10 本机实测）。
+> 前端回归：浏览器逐视图人工复跑（早期 `.verify/` CDP 脚本已随仓库清理移除）。
 
 ---
 
@@ -20,11 +20,11 @@ PRD 的 M1–M6 主体已实现并跑通：WebShell 会话管理、虚拟终端�
 
 | 层 | 位置 | 现状 |
 |---|---|---|
-| 前端 | `index.html` + `assets/` | Vue 3（CDN）+ ECharts 5，零构建；12 个导航视图 + `views/reverse.js` 反弹引导视图 |
-| API | `pivothub/api/` | FastAPI，**72 个端点**：projects / hosts / shells / links / creds / flags / timeline / export / recon / stage / tools / attack / netinfo / privesc / db / plugins |
-| 服务层 | `pivothub/service/` | 出网探测、终端固化、文件暂存双通道、链路编排、资产探测、统计、导出、时间线 |
-| 会话层 | `pivothub/session/` | 命令执行与文件读写的**唯一出口**：HTTP 马 / 本地进程 / 反弹通道 |
-| 适配器 | `pivothub/adapters/` | **仅 chisel 已接入**；frp / nps / Neo-reGeorg / EW / Stowaway / Venom / ligolo-ng 为占位（`data/meta.json` 标 `offline`，面板不可启用） |
+| 前端 | `index.html` + `assets/` | Vue 3（本地化全局构建）+ ECharts 5，零构建；**17 个导航视图**（含 SSH 会话 / 数据库 / 插件市场 / 资产探测） |
+| API | `pivothub/api/` | FastAPI，**83 个端点**：projects / hosts / shells / links / creds / flags / timeline / export / recon / stage / tools / attack / netinfo / privesc / db / plugins / fingerprint / clues |
+| 服务层 | `pivothub/service/` | 出网探测、终端固化、文件暂存双通道、链路编排、资产探测、提权匹配、指纹 / 线索、统计、导出、时间线 |
+| 会话层 | `pivothub/session/` | 命令执行与文件读写的**唯一出口**：HTTP 马 / 本地进程 / 反弹通道 / SSH |
+| 适配器 | `pivothub/adapters/` | **chisel / frp / Neo-reGeorg 已接入**；nps / EW / Stowaway / Venom / ligolo-ng 为占位（`data/meta.json` 标 `offline`，面板不可启用） |
 | 持久层 | `pivothub/models/` + SQLite | SQLAlchemy 2.x，`pivothub.db`（WAL）；库被清空后按 `data/seed_project.json` 重新播种 |
 
 ---
@@ -43,7 +43,7 @@ PRD 的 M1–M6 主体已实现并跑通：WebShell 会话管理、虚拟终端�
 
 **尚未实现**（详见 `README.md` §9 与 `docs/PROGRESS.md` 各轮「未决问题」）：
 
-- 代理工具仅 chisel 可用，其余 7 款下线不可启用（MS4 范围，`docs/ASSUMPTIONS.md` A-22）；
+- 代理工具 chisel / frp / Neo-reGeorg 可用，其余 5 款下线不可启用（`docs/ASSUMPTIONS.md` A-22）；
 - 断链自动重拉；
 - M1-7 冰蝎 / 哥斯拉协议（PRD 二期）；
 - M6-3 项目导入 / 导出打包：界面就绪，后端接口未实现；
@@ -57,11 +57,9 @@ PRD 的 M1–M6 主体已实现并跑通：WebShell 会话管理、虚拟终端�
 
 | 项 | 命令 / 来源 | 结果 |
 |---|---|---|
-| 后端全量回归 | `pytest tests/ -q -p no:warnings` | **157 passed**（403s，2026-09-09 本机实测） |
-| 前端 12 视图 | `node .verify/cdp-test.js`（需 8777 静态服务） | 0 错误 0 警告（`README.md` §8） |
-| 项目删除 E2E | CDP 实测：顶栏「－ 删除」→ confirm → 级联删除 → 自动切换 | PASS（临时库，12 视图复跑 0 错误） |
-| 端到端 | `.verify/deep-test.js` · `tty-test.js` · `proxy-test.js` 等 8 个脚本 | 见 `README.md` §8 |
-| 仓库规模 | `PACKAGE-MANIFEST.md` | 200 文件 / 约 42.2 MB |
+| 后端全量回归 | `pytest tests/ -q -p no:warnings` | **223 passed**（422s，2026-09-10 本机实测） |
+| 前端界面 | 浏览器逐视图复跑（人工） | 见 `docs/screenshots/` 截图集 |
+| 仓库规模 | `PACKAGE-MANIFEST.md` | 230 文件 / 约 113.5 MB（2026-09-10 清理后实测） |
 
 ---
 

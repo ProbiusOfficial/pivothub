@@ -2,9 +2,9 @@
 
 > 复盘日期：2026-09-10
 > 输入：`docs/USAGE-REPORT-20260909.md`（ZCode 内置浏览器黑盒评测，2 轮，2026-09-09 ~ 09-10）
-> 证据：`docs/shots/`（14 张）、`docs/export-④回声-writeup.md`、`docs/amq-exploit.py`、`docs/poc-cve-2023-46604.py`
+> 证据：`docs/shots/`（14 张）、`docs/export-④回声-writeup.md`
 > 本文件动作：**对报告全部问题做代码级根因核查**（不改代码），产出分批优化计划
-> 基线：`pytest tests/ -q -p no:warnings` → 157 passed（任何改动需保持全绿）
+> 基线：`pytest tests/ -q -p no:warnings` → 223 passed（任何改动需保持全绿）
 
 ---
 
@@ -99,7 +99,7 @@
 
 ## 四、后续工作（分批执行）
 
-> 每批结束必须：`pytest tests/ -q -p no:warnings` 全绿 + `.verify/` 12 视图复跑 0 错误 + 在 `scripts/lab/` 用真实靶机回归。
+> 每批结束必须：`pytest tests/ -q -p no:warnings` 全绿 + 浏览器逐视图复跑 0 错误 + 在 `scripts/lab/` 用真实靶机回归。
 
 ### Batch A · 打通闭环（P0 三件套）
 1. A1 自绘弹窗替代 `prompt`（4 处）
