@@ -24,7 +24,9 @@ def test_state_counts_match_seed(client):
     assert len(d["flags"]) >= 5
     assert len(d["timeline"]) >= 17
     assert len(d["commands"]) >= 16
-    assert len(d["ttyFixes"]) == 13
+    # 内置 data/tty_fixes 共 13 条（linux 9 + windows 4）；已安装且启用的数据插件
+    # 还会再贡献（如 tty-fixes-extra +2 → 15）。断言下限即可，避免插件一装就红。
+    assert len(d["ttyFixes"]) >= 13
     assert len(d["tools"]) == 8
 
 

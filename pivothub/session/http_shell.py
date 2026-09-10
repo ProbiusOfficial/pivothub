@@ -26,14 +26,29 @@ WINDOWS = "windows"
 
 
 def lang_of(shell_type: str, url: str = "") -> str:
+    """由 shell 类型/URL 判定驱动形态。
+
+    一期：PHP/JSP/ASP/ASPX 一句话马。
+    新增（A5）：`python` / `java` / `cmdhttp` —— 通用「命令回显 HTTP 端点」。
+    这类目标（Flask、Solr、任意 Java 服务）拿 RCE 后往往落不下一句话马，
+    只能挂一个自定义回显端点；面板按「参数名 = 命令」的约定与之通信。
+    """
     t = (shell_type or "") + " " + (url or "").lower()
-    if "php" in t.lower():
+    tl = t.lower()
+    # 顺序很重要：先认专用语言，再认通用「自定义参数」形态
+    if "python" in tl or shell_type.strip().lower() in ("py", "python3"):
+        return "python"
+    if "java" in tl and "javascript" not in tl:
+        return "java"
+    if any(k in tl for k in ("cmdhttp", "自定义参数", "自定义回显", "http 回显")):
+        return "cmdhttp"
+    if "php" in tl:
         return "php"
-    if "jsp" in t.lower():
+    if "jsp" in tl:
         return "jsp"
-    if "aspx" in t.lower():
+    if "aspx" in tl:
         return "aspx"
-    if "asp" in t.lower():
+    if "asp" in tl:
         return "asp"
     if url.endswith(".php"):
         return "php"
@@ -43,7 +58,13 @@ def lang_of(shell_type: str, url: str = "") -> str:
         return "aspx"
     if url.endswith(".asp"):
         return "asp"
+    if url.endswith(".py"):
+        return "python"
     return "unknown"
+
+
+#: 命令回显类形态（目标端直接回显命令输出，无 EOF 哨兵）
+ECHO_LANGS = ("jsp", "aspx", "asp", "python", "java", "cmdhttp")
 
 
 class HttpShellSession(SessionBase):
@@ -103,7 +124,10 @@ class HttpShellSession(SessionBase):
         return ExecResult(ok=ok, output=body.strip()[:200], ms=ms)
 
     def _cmd_field(self) -> str:
-        return "cmd" if self.lang == "jsp" else ("pass" if self.lang == "aspx" else self.pwd)
+        """命令放在哪个字段：JSP/ASPNET/命令回显类固定或自定义；PHP 用马密码字段。"""
+        if self.lang in ("jsp", "aspx", "python", "java", "cmdhttp"):
+            return self.pwd or "cmd"
+        return self.pwd
 
     # ---------------- 命令执行 ----------------
 
@@ -119,6 +143,9 @@ class HttpShellSession(SessionBase):
             fields = {"pass": cmd}
         elif self.lang == "asp":
             fields = {self.pwd: self._asp_exec_snippet(cmd)}
+        elif self.lang in ("python", "java", "cmdhttp"):
+            # 通用命令回显端点：参数名由「马密码」位置给出（缺省 cmd），值为裸命令
+            fields = {self._cmd_field(): cmd}
         else:
             return ExecResult(ok=False, error="未知 WebShell 语言")
         try:
@@ -128,7 +155,7 @@ class HttpShellSession(SessionBase):
         return self._parse_exec(body, ms)
 
     def _parse_exec(self, body: str, ms: int) -> ExecResult:
-        if self.lang in ("jsp", "aspx", "asp"):
+        if self.lang in ECHO_LANGS:
             # 这些形态直接回显命令输出：空回显是合法的（重定向、touch 等无输出命令），
             # 请求本身失败会走 SessionError，因此这里按成功处理。
             return ExecResult(ok=True, output=body.strip(), ms=ms)

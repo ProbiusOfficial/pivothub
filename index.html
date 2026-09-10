@@ -96,6 +96,7 @@
       <main class="main">
         <topology-view v-if="ui.view === 'topology'"></topology-view>
         <shell-view v-else-if="ui.view === 'shell'"></shell-view>
+        <ssh-view v-else-if="ui.view === 'ssh'"></ssh-view>
         <recon-view v-else-if="ui.view === 'recon'"></recon-view>
         <reverse-view v-else-if="ui.view === 'reverse'"></reverse-view>
         <files-view v-else-if="ui.view === 'files'"></files-view>
@@ -390,6 +391,9 @@
         <button class="btn btn-sm" @click="heartbeatAll()">
           <svg class="ico" viewBox="0 0 24 24" v-html="icon('activity')"></svg> 全部心跳
         </button>
+        <button class="btn btn-sm" @click="promoteToSsh()" title="以当前选中会话所属主机为目标，提升为 SSH 会话">
+          <svg class="ico" viewBox="0 0 24 24" v-html="icon('key')"></svg> 提升为 SSH 会话
+        </button>
         <button class="btn btn-sm btn-primary" @click="openAdd()">
           <svg class="ico" viewBox="0 0 24 24" v-html="icon('plus')"></svg> 添加 Shell
         </button>
@@ -414,7 +418,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="s in shells" :key="s.id" :class="{ 'is-selected': ui.selectedShellId === s.id }" @click="ui.selectedShellId = s.id">
+              <tr v-for="s in listShells" :key="s.id" :class="{ 'is-selected': ui.selectedShellId === s.id }" @click="ui.selectedShellId = s.id">
                 <td><span class="dot" :class="s.alive ? 'is-on' : 'is-off'" :title="s.alive ? '存活' : '断线'"></span></td>
                 <td><span class="badge badge-info">{{ s.type }}</span></td>
                 <td class="mono ellipsis" :title="s.url">{{ s.url }}</td>
@@ -431,8 +435,14 @@
                   <button class="btn btn-xs btn-danger" @click.stop="remove(s)">删除</button>
                 </td>
               </tr>
-              <tr v-if="!shells.length">
-                <td colspan="9" class="empty-cell">暂无 Shell 会话，点击右上角「添加 Shell」登记入口马</td>
+              <tr v-if="!listShells.length">
+                <td colspan="9" class="empty-cell">
+                  暂无 Shell 会话，点击右上角「添加 Shell」登记入口马
+                  <template v-if="sshCount">
+                    <br /><span class="muted tiny">（另有 {{ sshCount }} 个 SSH 会话已独立到「SSH 会话」页）</span>
+                    <button class="btn btn-xs" @click="goto('ssh')" style="margin-left:8px">去 SSH 会话</button>
+                  </template>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -712,6 +722,129 @@
 
   </div>
 </script>
+<!-- ============================= 模板：SSH 会话 ============================= -->
+<script type="text/x-template" id="tpl-ssh">
+  <div class="view view-ssh view-fill">
+    <div class="view-head">
+      <div>
+        <h2>SSH 会话</h2>
+        <p class="muted">独立纳管 SSH 主机 · 真实连接测试通过才落库 · 与 Shell 管理并存（同一会话在两边都能用）</p>
+      </div>
+      <div class="view-head-actions">
+        <button class="btn btn-sm" @click="heartbeatAll()">
+          <svg class="ico" viewBox="0 0 24 24" v-html="icon('activity')"></svg> 全部心跳
+        </button>
+        <button class="btn btn-sm btn-primary" @click="openAdd()">
+          <svg class="ico" viewBox="0 0 24 24" v-html="icon('plus')"></svg> 新建 SSH 会话
+        </button>
+      </div>
+    </div>
+
+    <div class="callout" v-if="!sessions.length">
+      <b>还没有 SSH 会话</b>
+      <p class="muted tiny">
+        两种方式：① 这里点「新建 SSH 会话」独立添加；
+        ② 到「Shell 管理」选中一个会话，点「提升为 SSH 会话」——会带着该会话所属主机跳到本页并预填。
+      </p>
+      <div><button class="btn btn-xs btn-primary" @click="goto('shell')">去 Shell 管理</button></div>
+    </div>
+
+    <div class="table-wrap" v-else>
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width:56px">状态</th>
+            <th>主机</th>
+            <th>用户名</th>
+            <th>宿主节点</th>
+            <th>平台</th>
+            <th>延迟</th>
+            <th>最后心跳</th>
+            <th style="width:220px">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="s in sessions" :key="s.id" :class="{ 'is-selected': ui.selectedShellId === s.id }"
+              @click="ui.selectedShellId = s.id">
+            <td><span class="dot" :class="s.alive ? 'is-on' : 'is-off'" :title="s.alive ? '存活' : '断线'"></span></td>
+            <td class="mono">{{ targetOf(s) || ipOf(s.hostId) }}</td>
+            <td class="mono">{{ userOf(s) }}</td>
+            <td>{{ ipOf(s.hostId) }}<span class="muted tiny"> · {{ hostnameOf(s.hostId) }}</span></td>
+            <td><span class="badge badge-info">{{ s.platform || '—' }}</span></td>
+            <td class="mono" :class="latencyClass(s)">{{ s.alive ? s.latency + 'ms' : '—' }}</td>
+            <td class="muted tiny">{{ s.lastBeat }}</td>
+            <td>
+              <button class="btn btn-xs" @click.stop="openTerminal(s)">交互终端</button>
+              <button class="btn btn-xs" @click.stop="test(s)">测试</button>
+              <button class="btn btn-xs btn-danger" @click.stop="remove(s)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 新建 SSH 会话弹窗（真实连接测试通过才落库） -->
+    <div class="modal-mask" v-if="ui.modal === 'ssh-add'" @click.self="ui.modal = null">
+      <div class="modal">
+        <div class="modal-head">
+          <h3>{{ form.fromShellId ? '提升为 SSH 会话' : '新建 SSH 会话' }}</h3>
+          <button class="icon-btn" @click="ui.modal = null">×</button>
+        </div>
+        <div class="modal-body form-grid">
+          <p class="field-full muted tiny" v-if="form.fromShellId">
+            来自 Shell 管理的「提升」：已按该会话所属主机预填目标。凭据需你填写（面板不猜口令）；连接通过后会新增一个独立 SSH 会话，原 Shell 记录不受影响。
+          </p>
+          <p class="field-full muted tiny" v-else>
+            直接以 SSH 纳管主机（比 WebShell 稳定）：面板会先做一次<b>真实连接测试</b>，通过后才落库为会话。
+          </p>
+          <label class="field">
+            <span>主机（IP / 域名）</span>
+            <input class="input mono" v-model="form.host" placeholder="如 10.66.0.20" />
+          </label>
+          <label class="field">
+            <span>端口</span>
+            <input class="input mono" type="number" v-model.number="form.port" />
+          </label>
+          <label class="field">
+            <span>用户名</span>
+            <input class="input mono" v-model="form.username" placeholder="如 root" />
+          </label>
+          <label class="field">
+            <span>密码</span>
+            <input class="input" type="password" v-model="form.password" placeholder="留空则需私钥（本期 API 不落库私钥）" />
+          </label>
+          <label class="field">
+            <span>归属主机（可选）</span>
+            <select class="input" v-model="form.hostId">
+              <option value="">（不指定 · 按 IP 自动创建）</option>
+              <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.ip }}（{{ h.layer }}）</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>平台（可选）</span>
+            <select class="input" v-model="form.platform">
+              <option value="">（自动探测）</option>
+              <option value="linux">linux</option>
+              <option value="windows">windows</option>
+            </select>
+          </label>
+          <label class="field field-full checkbox-line">
+            <input type="checkbox" v-model="form.autoHost" />
+            <span>主机不存在时自动创建节点，并回传基础信息（id / uname / hostname）入库</span>
+          </label>
+        </div>
+        <div class="modal-foot">
+          <span class="grow muted tiny" v-if="form.testResult" :class="form.testResult.ok ? 'text-ok' : 'text-err'">{{ form.testResult.msg }}</span>
+          <button class="btn" @click="ui.modal = null">取消</button>
+          <button class="btn btn-primary" :disabled="form.busy" @click="saveSsh()">
+            {{ form.busy ? '连接中…' : '连接并纳管' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</script>
+
 
 <!-- ============================= 模板：资产探测 ============================= -->
 <script type="text/x-template" id="tpl-recon">
@@ -982,6 +1115,137 @@
           </details>
         </div>
       </div>
+
+      <!-- ④ 线索检索与应用指纹（A2 配置文件线索 / A9 应用指纹 / A10 目录上下文发现） -->
+      <div class="panel">
+        <div class="panel-head">
+          <h3>
+            ④ 线索检索与应用指纹
+            <span class="badge badge-info">真实执行于目标侧</span>
+          </h3>
+          <div class="row-gap">
+            <button class="btn btn-xs" @click="fillTargets()">从扫描结果填入</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <p class="muted tiny">
+            在「当前会话」这台机器上真实执行：<b>线索检索</b> = 遍历常见配置目录 grep
+            <code class="mono">pass / password / token / api_key / secret / private key / flag</code> 并高亮；
+            <b>应用指纹</b> = 对目标 host:port 识别 Shiro / Jenkins / Nacos / Docker Registry / Actuator / Tomcat；
+            <b>目录发现</b> = 探测非 ROOT context、管理台与源码备份。
+          </p>
+
+          <div class="form-grid" style="margin-top:8px">
+            <label class="field field-full">
+              <span>指纹 / 目录目标（完整 URL，逗号或空格分隔）</span>
+              <input class="input mono" v-model="fp.targets" placeholder="如 http://10.10.20.5:8080, http://10.10.20.6:7001" />
+            </label>
+            <div class="field field-full row-gap">
+              <button class="btn btn-primary" @click="runClues()" :disabled="!shellId || clue.busy">
+                {{ clue.busy ? '检索中…' : '配置文件线索检索' }}
+              </button>
+              <button class="btn btn-primary" @click="runFingerprint()" :disabled="!shellId || fp.busy">
+                {{ fp.busy ? '探测中…' : '应用指纹探测' }}
+              </button>
+              <button class="btn btn-primary" @click="runDirs()" :disabled="!shellId || dir.busy">
+                {{ dir.busy ? '扫描中…' : '目录 / 上下文发现' }}
+              </button>
+              <button class="btn btn-sm btn-ghost" @click="fp.targets = ''; dir.urls = ''">清空目标</button>
+            </div>
+            <label class="field field-full">
+              <span>目录发现 base URL（多个用逗号分隔）</span>
+              <input class="input mono" v-model="dir.urls" placeholder="如 http://10.10.20.5:8080" />
+            </label>
+          </div>
+
+          <!-- 线索检索结果 -->
+          <div v-if="clue.error" class="callout callout-err" style="margin-top:10px">
+            <b class="text-err">线索检索失败</b><p class="muted tiny">{{ clue.error }}</p>
+          </div>
+          <div v-if="clue.result" style="margin-top:10px">
+            <div class="res-line">
+              <span>线索检索</span>
+              <b>{{ (clue.result.items || []).length }} 个文件命中</b>
+            </div>
+            <p class="muted tiny" v-if="clue.result.summary && clue.result.summary.scanned != null">
+              已扫描 {{ clue.result.summary.scanned }} 个文件 · 命中 {{ clue.result.summary.hits || 0 }} 条
+            </p>
+            <div class="table-wrap" v-if="(clue.result.items || []).length">
+              <table class="table table-sm">
+                <thead><tr><th style="width:38%">文件</th><th>命中行（关键字高亮）</th></tr></thead>
+                <tbody>
+                  <tr v-for="f in clue.result.items" :key="f.file">
+                    <td class="mono tiny ellipsis" :title="f.file">{{ f.file }}</td>
+                    <td>
+                      <div class="clue-hit" v-for="(h, i) in f.hits" :key="i">
+                        <span class="badge badge-warn mono">{{ h.keyword }}</span>
+                        <span class="mono tiny">:{{ h.line }}</span>
+                        <code class="clue-text">{{ h.text }}</code>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="muted tiny" v-else>未命中任何线索（可确认目标是否有配置目录读取权限）。</p>
+          </div>
+
+          <!-- 应用指纹结果 -->
+          <div v-if="fp.error" class="callout callout-err" style="margin-top:10px">
+            <b class="text-err">指纹探测失败</b><p class="muted tiny">{{ fp.error }}</p>
+          </div>
+          <div v-if="fp.result" style="margin-top:10px">
+            <div class="res-line"><span>应用指纹</span>
+              <b>{{ (fp.result.items || []).length }} 个目标</b></div>
+            <div class="table-wrap">
+              <table class="table table-sm">
+                <thead><tr><th>目标</th><th style="width:60px">状态</th><th>识别应用</th><th>证据 / 建议</th></tr></thead>
+                <tbody>
+                  <tr v-for="it in fp.result.items" :key="it.target">
+                    <td class="mono">{{ it.target }}</td>
+                    <td class="mono">{{ it.status || '—' }}</td>
+                    <td>
+                      <span class="badge" :class="it.app ? 'badge-ok' : 'badge-idle'">
+                        {{ it.app ? (it.app + (it.version ? ' ' + it.version : '')) : '未识别' }}</span>
+                    </td>
+                    <td class="tiny">
+                      <div v-for="(p, i) in (it.probes || []).filter(p => p.state === 'hit')" :key="'p' + i" class="mono">
+                        <span class="badge badge-warn">{{ p.name }}</span> {{ p.evidence }}
+                      </div>
+                      <div v-for="(a, i) in (it.advice || [])" :key="'a' + i" class="muted">{{ a }}</div>
+                      <span class="muted" v-if="!(it.probes || []).some(p => p.state === 'hit') && !(it.advice || []).length">—</span>
+                    </td>
+                  </tr>
+                  <tr v-if="!(fp.result.items || []).length"><td colspan="4" class="empty-cell">无结果</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 目录发现结果 -->
+          <div v-if="dir.error" class="callout callout-err" style="margin-top:10px">
+            <b class="text-err">目录发现失败</b><p class="muted tiny">{{ dir.error }}</p>
+          </div>
+          <div v-if="dir.result" style="margin-top:10px">
+            <div class="res-line"><span>目录 / 上下文发现</span>
+              <b>{{ (dir.result.items || []).length }} 个路径命中</b></div>
+            <div class="table-wrap">
+              <table class="table table-sm">
+                <thead><tr><th style="width:64px">状态</th><th>路径</th><th style="width:90px">长度</th><th>标题 / 备注</th></tr></thead>
+                <tbody>
+                  <tr v-for="it in dir.result.items" :key="it.url">
+                    <td class="mono">{{ it.status }}</td>
+                    <td class="mono tiny ellipsis" :title="it.url">{{ it.url }}</td>
+                    <td class="mono tiny">{{ it.length }}</td>
+                    <td class="tiny">{{ it.title || it.note || '—' }}</td>
+                  </tr>
+                  <tr v-if="!(dir.result.items || []).length"><td colspan="4" class="empty-cell">无命中</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </script>
@@ -1138,6 +1402,13 @@
               <option v-for="k in kinds" :key="k.key" :value="k.key">{{ k.label }}</option>
             </select>
           </label>
+          <label class="field">
+            <span>登记主机（回连后归属哪台机器；留空 = 按回连对端 IP 自动创建）</span>
+            <select class="input" v-model="manualHostId">
+              <option value="">自动（按回连 IP 创建/复用主机）</option>
+              <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.ip }}（{{ h.layer }}）</option>
+            </select>
+          </label>
           <pre class="code-block code-xs"><code>{{ payload() }}</code></pre>
           <div class="row-gap">
             <button class="btn btn-primary" :disabled="running" @click="start()">{{ running ? '监听中…' : '① 开始监听' }}</button>
@@ -1166,20 +1437,28 @@
         <p class="muted tiny" v-else>还没有操作：选好会话与载荷，点「① 开始监听」。</p>
 
         <table class="table" v-if="listeners.length">
-          <thead><tr><th>监听地址</th><th>回连状态</th><th style="width:80px">操作</th></tr></thead>
+          <thead><tr><th>监听地址</th><th>回连状态</th><th style="width:150px">操作</th></tr></thead>
           <tbody>
             <tr v-for="l in listeners" :key="l.id">
               <td class="mono">{{ l.bind }}:{{ l.port }}</td>
               <td>
                 <span class="badge" :class="l.error ? 'badge-err' : (l.connected ? 'badge-ok' : 'badge-idle')">
-                  {{ l.error ? '未恢复' : (l.connected ? '已回连 ' + (((l.peer || [])[0]) || '') : '等待中') }}
+                  {{ listenerState(l) }}
                 </span>
+                <span v-if="l.connected" class="muted tiny mono"> {{ listenerPeer(l) }}</span>
                 <span v-if="l.error" class="muted tiny" :title="l.error"> {{ l.error }}</span>
               </td>
-              <td><button class="btn btn-xs btn-danger" @click="closeOne(l.id)">关闭</button></td>
+              <td>
+                <button class="btn btn-xs btn-primary" v-if="l.connected && !l.error"
+                        @click="register(l, true)">登记为会话</button>
+                <button class="btn btn-xs btn-danger" @click="closeOne(l.id)">关闭</button>
+              </td>
             </tr>
           </tbody>
         </table>
+        <p class="muted tiny" v-if="listeners.some(l => l.connected)">
+          已回连但未自动登记？在上面选好「登记主机」(留空则按回连对端 IP 自动建主机)，点该行的「登记为会话」。
+        </p>
 
         <div class="panel-sub" v-if="reverseShells.length">
           <h4>反弹会话</h4>
@@ -1561,6 +1840,71 @@
             <b>探测进行中…</b>
             <p class="muted tiny">四类探针全部完成后会给出隧道选型建议。</p>
           </div>
+
+          <!-- A4：回连端口矩阵 —— 对攻击机逐端口实测「哪个端口能回连」 -->
+          <div class="probe-section">
+            <div class="probe-section-head">
+              <b>回连端口矩阵</b>
+              <span class="muted tiny">对攻击机 {{ compose.attackIp || '（未设置）' }} 逐端口实测，结论端口可直接填进隧道监听端口</span>
+            </div>
+            <div class="row-gap" style="margin:6px 0">
+              <input class="input input-sm mono" v-model="detect.matrixPorts" style="width:320px"
+                     placeholder="自定义端口（逗号分隔，留空用默认集）" />
+              <button class="btn btn-sm btn-primary" :disabled="detect.matrixRunning || !compose.attackIp"
+                      @click="runMatrix()">
+                {{ detect.matrixRunning ? '实测中…' : '实测回连端口' }}
+              </button>
+              <span class="muted tiny" v-if="!compose.attackIp">请先到「攻击机网络设置」填写本机在靶场网络的 IP</span>
+            </div>
+            <div v-if="detect.matrix">
+              <div class="res-line"><span>矩阵结论</span><b>{{ detect.matrix.verdict }}</b></div>
+              <p class="muted tiny" v-if="detect.matrix.reason">{{ detect.matrix.reason }}</p>
+              <div class="table-wrap">
+                <table class="table table-sm">
+                  <thead><tr><th>端口</th><th style="width:70px">状态</th><th>耗时</th><th>证据</th></tr></thead>
+                  <tbody>
+                    <tr v-for="p in detect.matrix.probes" :key="p.key">
+                      <td class="mono">{{ p.key }}</td>
+                      <td><span class="badge" :class="p.state === 'ok' ? 'badge-ok' : 'badge-err'">
+                        {{ p.state === 'ok' ? '可达' : '阻断' }}</span></td>
+                      <td class="mono tiny">{{ p.ms }}ms</td>
+                      <td class="tiny muted ellipsis" :title="p.evidence">{{ p.evidence || '—' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="muted tiny" v-if="detect.reachablePorts.length">
+                可达端口：<span class="mono text-ok">{{ detect.reachablePorts.join(', ') }}</span>
+                —— 隧道服务端监听端口建议从中选取。
+              </p>
+            </div>
+          </div>
+
+          <!-- A6：证据驱动的隧道模板（含攻击机侧 / 目标侧可执行命令） -->
+          <div class="probe-section" v-if="detect.templates.length">
+            <div class="probe-section-head">
+              <b>可用隧道模板</b>
+              <span class="muted tiny">按刚才探测到的出网能力筛选（ICMP / DNS 隧道需外部工具编排）</span>
+            </div>
+            <div class="tpl-item" v-for="t in detect.templates" :key="t.id">
+              <div class="tpl-head">
+                <b>{{ t.name }}</b>
+                <span class="badge badge-info mono">{{ t.transport }}</span>
+              </div>
+              <p class="muted tiny">{{ t.condition }}</p>
+              <p class="muted tiny" v-if="t.note">{{ t.note }}</p>
+              <div class="tpl-cmd">
+                <span class="muted tiny">攻击机</span>
+                <code class="mono">{{ t.attackerCmd }}</code>
+                <button class="btn btn-xs btn-ghost" @click="copy(t.attackerCmd)">复制</button>
+              </div>
+              <div class="tpl-cmd">
+                <span class="muted tiny">目标侧</span>
+                <code class="mono">{{ t.targetCmd }}</code>
+                <button class="btn btn-xs btn-ghost" @click="copy(t.targetCmd)">复制</button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="modal-foot">
@@ -1621,7 +1965,7 @@
       </div>
     </div>
 
-    <!-- 代理工具设置弹窗（MS4：仅 chisel 已接入，其余为下线状态） -->
+    <!-- 代理工具设置弹窗（status=online 的工具才可启用：当前 chisel / frp / Neo-reGeorg） -->
     <div class="modal-mask" v-if="ui.modal === 'tools-cfg'" @click.self="ui.modal = null">
       <div class="modal modal-tools">
         <div class="modal-head">
@@ -1879,6 +2223,7 @@
         <p class="muted">按主机 / 阶段记录已拿 Flag，一键复制提交，看板展示完成度</p>
       </div>
       <div class="view-head-actions">
+        <button class="btn btn-sm" @click="openStages()">阶段设置</button>
         <button class="btn btn-sm btn-primary" @click="openAdd()">记录 Flag</button>
       </div>
     </div>
@@ -1915,7 +2260,9 @@
         <div class="flag-value mono">{{ f.value }}</div>
         <div class="flag-foot">
           <button class="btn btn-xs" @click="copy(f.value)">复制提交</button>
-          <button class="btn btn-xs" :class="f.submitted ? '' : 'btn-primary'" @click="f.submitted = !f.submitted">{{ f.submitted ? '撤销' : '标记已交' }}</button>
+          <button class="btn btn-xs" :class="f.submitted ? '' : 'btn-primary'" @click="toggleSubmitted(f)">{{ f.submitted ? '撤销' : '标记已交' }}</button>
+          <button class="btn btn-xs" @click="openEdit(f)">编辑</button>
+          <button class="btn btn-xs btn-danger" @click="del(f)">删除</button>
         </div>
       </div>
       <div class="flag-card is-empty" @click="openAdd()">
@@ -1936,6 +2283,60 @@
         <div class="modal-foot">
           <button class="btn" @click="ui.modal = null">取消</button>
           <button class="btn btn-primary" @click="save()">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 编辑 Flag 弹窗（A12：改绑主机 / 阶段 / 内容 / 备注） -->
+    <div class="modal-mask" v-if="ui.modal === 'flag-edit'" @click.self="ui.modal = null">
+      <div class="modal">
+        <div class="modal-head"><h3>编辑 Flag</h3><button class="icon-btn" @click="ui.modal = null">×</button></div>
+        <div class="modal-body form-grid">
+          <label class="field"><span>所属主机（改绑须同项目）</span>
+            <select class="input" v-model="edit.hostId">
+              <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.ip }}</option>
+            </select>
+          </label>
+          <label class="field"><span>阶段</span>
+            <input class="input" v-model="edit.stage" placeholder="如 L2 内网" />
+          </label>
+          <label class="field field-full"><span>Flag 内容</span>
+            <input class="input mono" v-model="edit.value" placeholder="flag{...}" />
+          </label>
+          <label class="field field-full"><span>备注</span>
+            <input class="input" v-model="edit.note" placeholder="纠错 / 改绑记录（可空）" />
+          </label>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="ui.modal = null">取消</button>
+          <button class="btn btn-primary" :disabled="edit.busy" @click="saveEdit()">{{ edit.busy ? '保存中…' : '保存' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 阶段设置弹窗（A12：项目级自定义阶段名） -->
+    <div class="modal-mask" v-if="ui.modal === 'stage-edit'" @click.self="ui.modal = null">
+      <div class="modal">
+        <div class="modal-head"><h3>阶段设置</h3><button class="icon-btn" @click="ui.modal = null">×</button></div>
+        <div class="modal-body">
+          <p class="muted tiny">
+            阶段名用于 Flag 墙的分阶段完成度统计与「记录 Flag」下拉；<b>按项目保存</b>，不影响其它项目。
+            Flag 本身允许任意阶段字符串（记录后可随时在「编辑」里改绑）。
+          </p>
+          <div class="stage-edit-list">
+            <div class="stage-edit-row" v-for="(s, i) in stageEdit.list" :key="i">
+              <span class="muted mono tiny" style="width:22px">{{ i + 1 }}</span>
+              <input class="input" v-model="stageEdit.list[i]" placeholder="如 L2 内网" />
+              <button class="btn btn-xs btn-danger" @click="removeStage(i)">移除</button>
+            </div>
+            <p class="muted tiny" v-if="!stageEdit.list.length">暂无阶段名，点下方「新增阶段」添加。</p>
+          </div>
+          <button class="btn btn-sm" @click="addStage()" style="margin-top:8px">新增阶段</button>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="resetStages()" :disabled="stageEdit.busy">恢复默认</button>
+          <button class="btn" @click="ui.modal = null">取消</button>
+          <button class="btn btn-primary" :disabled="stageEdit.busy" @click="saveStages()">{{ stageEdit.busy ? '保存中…' : '保存' }}</button>
         </div>
       </div>
     </div>
@@ -2471,7 +2872,7 @@
 </script>
 
 <script type="text/x-template" id="tpl-modal-layer">
-  <div class="modal-mask" v-if="ui.modal && !['shell-add','host-add','scan-import','cred-add','flag-add','note-add','tty-fix','attack-cfg','tools-cfg','global-cfg','probe'].includes(ui.modal)" @click.self="ui.modal = null">
+  <div class="modal-mask" v-if="ui.modal && !['shell-add','ssh-add','host-add','scan-import','cred-add','flag-add','flag-edit','stage-edit','note-add','tty-fix','attack-cfg','tools-cfg','global-cfg','probe'].includes(ui.modal)" @click.self="ui.modal = null">
     <div class="modal">
       <div class="modal-head">
         <h3>{{ modalTitle }}</h3>
@@ -2499,6 +2900,7 @@
 <script src="assets/js/components/common.js"></script>
 <script src="assets/js/topology.js"></script>
 <script src="assets/js/views/shell.js"></script>
+<script src="assets/js/views/ssh.js"></script>
 <script src="assets/js/views/recon.js"></script>
 <script src="assets/js/views/files.js"></script>
 <script src="assets/js/views/reverse.js"></script>

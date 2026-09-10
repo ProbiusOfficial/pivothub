@@ -13,7 +13,30 @@
       err.notImplemented = true;
       throw err;
     }
-    if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + path);
+    if (!res.ok) {
+      // ⚠️ 修正：原先只抛 `HTTP <status> <path>`，把后端的 detail 整条丢掉，
+      // 导致「主机不存在(404)」与「路由不存在(404)」在界面上同形，
+      // 用户看到「登记失败：HTTP 404 /api/...」会误判成接口缺失。
+      // 现在优先展示后端 detail/error，HTTP 信息降为后缀（保留原有格式兼容）。
+      let detail = '';
+      try {
+        const txt = await res.text();
+        if (txt) {
+          try {
+            const j = JSON.parse(txt);
+            const d = (j && (j.detail || j.error || j.message));
+            detail = typeof d === 'string' ? d : (d ? JSON.stringify(d) : '');
+          } catch (e) { detail = String(txt).slice(0, 300); }
+        }
+      } catch (e) { /* 读体失败不影响主流程 */ }
+      const err = new Error(detail
+        ? detail + ' · HTTP ' + res.status + ' ' + path
+        : 'HTTP ' + res.status + ' ' + path);
+      err.status = res.status;
+      err.path = path;
+      err.detail = detail;
+      throw err;
+    }
     const text = await res.text();
     return text ? JSON.parse(text) : null;
   };

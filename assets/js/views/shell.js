@@ -29,6 +29,13 @@
 
       const activeShell = computed(() => S.activeShell());
 
+      /* Shell 管理只列「非 SSH」会话（SSH 已独立到「SSH 会话」页）；
+         SSH 会话仍留在 state.shells 里，交互终端 / 文件管理 / 其它视图照常可用。 */
+      const listShells = computed(() =>
+        S.state.shells.filter((s) => s.kind !== 'ssh')
+          .sort((a, b) => (b.alive ? 1 : 0) - (a.alive ? 1 : 0)));
+      const sshCount = computed(() => S.state.shells.filter((s) => s.kind === 'ssh').length);
+
       function loadFileState() {
         const fs = S.fileStateFor(ui.selectedShellId);
         Object.assign(file, fs);
@@ -138,6 +145,14 @@
       function upload() { S.pickAndUpload(file); }
 
       /* ---------- 连接管理 ---------- */
+      /* 提升为 SSH 会话：跳到「SSH 会话」页并带上当前选中会话，由该页预填目标后做真实连接测试。
+         不移除、不改动原 Shell 记录，两边并存。 */
+      function promoteToSsh() {
+        const s = activeShell.value || S.state.shells.find((x) => x.id === ui.selectedShellId);
+        if (!s) { S.toast('请先在列表中选中一个会话，再点「提升为 SSH 会话」', 'err'); return; }
+        S.goto('ssh', { promoteShellId: s.id });
+        S.toast('已带到 SSH 会话页：填好凭据即可纳管（原会话不受影响）', 'info');
+      }
       function openAdd() {
         form.testResult = null;
         ui.modal = 'shell-add';
@@ -344,6 +359,7 @@
       return {
         ui, termEl, termInputEl, termInput, termState, activeTerm: termState, file, form, activeShell,
         shells: S.state.shells, hosts: S.state.hosts,
+        listShells, sshCount,
         shellTypes: S.state.shellTypes || [], encoders: S.state.encoders || [],
         hintCommands: S.HINT_CMDS,
         ipOf: S.ipOf, copy: S.copy, icon: global.icon, goto: S.goto,
@@ -352,6 +368,7 @@
         modeBadge,
         cd, cdPath, openFile, upload,
         openAdd, testForm, save, test, remove, heartbeatAll, latencyClass,
+        promoteToSsh,
         fixFilter, fixes, appliedList, ttyMode, ps1,
         detectTty, applyFix, finishTty, copyFix, sendFix, isApplied, fixCmdText,
         privescBusy, privescResult, oneClickPrivesc, clearEscalation,

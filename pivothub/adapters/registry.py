@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from .base import AdapterBase
 from .chisel import ChiselAdapter
+from .frp import FrpAdapter
+from .neoreg import NeoRegAdapter
 
 _REGISTRY: dict[str, type[AdapterBase]] = {
     "chisel": ChiselAdapter,
-    # frp / Neo-reGeorg 随 MS3 补齐后在此注册
+    "frp": FrpAdapter,
+    "Neo-reGeorg": NeoRegAdapter,
+    # nps / EW ... 随 MS3 补齐后在此注册
 }
 
 

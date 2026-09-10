@@ -509,3 +509,22 @@ select.input option { background: var(--bg-1); color: var(--text); }
 .toast-info .ico { color: var(--info); }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateX(20px); }
 .toast-enter-active, .toast-leave-active { transition: all 0.22s ease; }
+
+/* 线索检索命中行 + 错误 callout（A2 / A9 / A10） */
+.callout-err { border-left-color: var(--err); }
+.clue-hit { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; padding: 1px 0; }
+.clue-text { font-family: var(--mono); font-size: 11px; color: var(--text-mute); word-break: break-all; white-space: pre-wrap; }
+
+/* 出网探测弹窗：回连矩阵 + 隧道模板（A4 / A6） */
+.probe-section { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.probe-section-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.probe-section-head b { font-size: 13px; }
+.tpl-item { margin-top: 8px; padding: 8px 10px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r); }
+.tpl-head { display: flex; align-items: center; gap: 8px; }
+.tpl-cmd { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.tpl-cmd code { flex: 1; padding: 3px 6px; background: var(--bg-1, rgba(0,0,0,0.25)); border-radius: 4px; font-size: 11px; word-break: break-all; }
+
+/* 阶段设置弹窗（A12） */
+.stage-edit-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.stage-edit-row { display: flex; align-items: center; gap: 8px; }
+.stage-edit-row .input { flex: 1; }

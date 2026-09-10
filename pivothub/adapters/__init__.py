@@ -7,10 +7,13 @@ register_link → health_check → destroy）。
 
 from .base import LINK_TYPES, AdapterBase, DeployResult, PidRecord, TunnelCheck
 from .chisel import ChiselAdapter, pick_lhost, port_open, read_banner, socks5_read_banner
+from .frp import FrpAdapter
+from .neoreg import NeoRegAdapter
 from .registry import AdapterError, get_adapter
 
 __all__ = [
     "AdapterBase", "DeployResult", "PidRecord", "TunnelCheck", "LINK_TYPES",
-    "ChiselAdapter", "pick_lhost", "port_open", "read_banner", "socks5_read_banner",
+    "ChiselAdapter", "FrpAdapter", "NeoRegAdapter", "pick_lhost", "port_open",
+    "read_banner", "socks5_read_banner",
     "AdapterError", "get_adapter",
 ]

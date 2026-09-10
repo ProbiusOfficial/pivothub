@@ -58,9 +58,16 @@
     "platform": "linux",
     "risk": "中",
     "reliability": 80,
-    "match": "(?m)^/\\S*/(nmap|vim|vi|find|bash|sh|more|less|python3?|perl|ruby|awk|cp|mv|nano|tee|xxd|tar|zip|gdb|env|mount|screen|systemctl)$",
+    "match": "(?m)^/\\S*/(nmap|vim|vi|find|bash|sh|more|less|python3?|perl|ruby|awk|cp|mv|nano|tee|xxd|tar|zip|gdb|env|screen|systemctl)$",
+    "excludeBasename": [
+      "mount", "umount", "su", "passwd", "chsh", "chfn", "gpasswd", "newgrp",
+      "pkexec", "fusermount", "fusermount3", "ping", "traceroute", "ntfs-3g",
+      "snap-confine", "vmware-user-suid-wrapper"
+    ],
     "cmd": "find / -xdev -perm -4000 -type f 2>/dev/null",
-    "note": "带 SUID 的常见工具可用 GTFOBins 提权；先看证据里的具体二进制。"
+    "verify": "for b in $(find / -xdev -perm -4000 -type f 2>/dev/null); do n=$(basename \"$b\"); case \"$n\" in find) o=$(find /etc/shadow -exec id \\; 2>/dev/null | head -1);; env) o=$(env /usr/bin/id 2>/dev/null);; tar) o=$(tar -cf /dev/null /etc/shadow -I /usr/bin/id 2>/dev/null);; bash|sh|python3|python|perl|ruby|gdb|nmap|vim|vi|more|less|nano|awk|cp|mv|tee|xxd|zip|screen|systemctl) o=$(\"$b\" -c id 2>/dev/null || \"$b\" -es id 2>/dev/null);; *) continue;; esac; echo \"$o\" | grep -q 'uid=0' && { echo \"ROOT via $b: $o\"; break; }; done",
+    "expect": "uid=0",
+    "note": "仅当 SUID 二进制**不是发行版默认即带 SUID** 时命中（如运维误给 /usr/bin/find 加 SUID）。命中后必须再用 verify 实际跑一次 GTFOBins 提权并确认 uid=0，才视为「已验证」；否则只作疑似提示，绝不报「已执行」。excludeBasename 里的 mount/umount/su/passwd 等是 Debian/Ubuntu 出厂默认 SUID，属正常状态。"
   },
   {
     "id": "linux-ld-preload",

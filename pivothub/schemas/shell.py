@@ -54,3 +54,26 @@ class ShellIn(BaseModel):
     #: 驱动类型（'' = HTTP 马；'reverse' = 反弹 Shell 通道）
     kind: str = ""
     note: str = ""
+
+
+class SshIn(BaseModel):
+    """SSH 会话纳管入参（A7）。host / username 必填，缺失即校验失败。
+
+    私钥认证为 SshSession 能力，但本期 API 不持久化私钥路径/口令
+    （Shell 模型无相应列）；如需临时用私钥可经 keyPath/keyPassphrase 传入，
+    仅用于当次连接测试，不落库。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    projectId: str = ""
+    hostId: str = ""          # 可选：显式绑定主机（须属于本项目）
+    host: str                  # SSH 目标 IP / 主机名（必填）
+    port: int = 22
+    username: str              # 登录用户名（必填）
+    password: str = ""
+    keyPath: str = ""          # 可选：私钥路径（不持久化）
+    keyPassphrase: str = ""    # 可选：私钥口令（不持久化）
+    platform: str = ""         # 可选：显式平台（'' 则由 uname 探测）
+    autoHost: bool = True      # 主机不存在时自动创建
+    autoCollect: bool = True   # 连接成功后自动回传基础信息

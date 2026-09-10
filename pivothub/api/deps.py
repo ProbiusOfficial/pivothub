@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from ..db import get_attack, get_tools, load_meta, load_plugin_dir
+from ..db import get_attack, get_stages, get_tools, load_meta, load_plugin_dir
 from ..models import Credential, Flag, Host, Project, ProxyLink, Shell, TimelineEvent
 from ..schemas import (
     AttackOut, CredOut, FlagOut, HostOut, LinkOut, ProjectBrief, ProjectOut, ShellOut,
@@ -73,6 +73,6 @@ def build_state(db: Session, project_id: str) -> StateOut:
         encoders=meta.get("encoders", []),
         credKinds=meta.get("credKinds", []),
         layers=meta.get("layers", []),
-        stageNames=meta.get("stageNames", []),
+        stageNames=get_stages(db, project_id),
         scanSample=meta.get("scanSample", ""),
     )

@@ -1,4 +1,4 @@
-"""代理工具：GET / PUT /api/tools（MS4 仅 chisel 已接入，其余为下线状态）。
+"""代理工具：GET / PUT /api/tools（status=online 的工具才可启用）。
 
 目录来自 data/meta.json → tools；启用集是项目级设置（Project.settings["tools"]），
 只允许启用 status=online 的工具——未接入适配器的工具必须诚实标记为「下线」，

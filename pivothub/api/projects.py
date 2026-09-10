@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..config import DEFAULT_PROJECT_ID
-from ..db import default_attack, get_attack, get_db, now
+from ..db import default_attack, get_attack, get_db, now, set_stages
 from ..localinfo import iface_for, machine
 from ..models import Credential, Flag, Host, Project, ProxyLink, Shell, TimelineEvent
 from ..schemas import ProjectBrief, StateOut
@@ -130,3 +130,32 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
 @router.get("/projects/{project_id}/state", response_model=StateOut)
 def project_state(project_id: str, db: Session = Depends(get_db)):
     return build_state(db, project_id)
+
+
+class StagesIn(BaseModel):
+    """阶段自定义（A12）：传空列表 = 恢复默认阶段名。"""
+
+    projectId: str = ""
+    stages: list[str] = []
+
+
+@router.put("/stages")
+def update_stages(form: StagesIn, projectId: str = "", db: Session = Depends(get_db)):
+    """保存项目级阶段名（Flag 墙分阶段统计与下拉的数据源）。
+
+    去重保序、自动去空白；空列表回落到 data/meta.json 的默认阶段名。
+    阶段名只影响展示与分组，不约束 Flag 本身（Flag.stage 允许任意字符串）。
+    """
+    pid = form.projectId or projectId or DEFAULT_PROJECT_ID
+    project = db.get(Project, pid)
+    if project is None:
+        raise HTTPException(404, f"项目不存在: {pid}")
+    try:
+        stages = set_stages(db, pid, form.stages)
+    except KeyError:
+        raise HTTPException(404, f"项目不存在: {pid}")
+    add_event(db, pid, "flag", "阶段设置更新",
+              detail="已设置: " + (", ".join(stages) if stages else "默认阶段"))
+    db.commit()
+    manager.push("stages.updated", stages=stages)
+    return {"ok": True, "projectId": pid, "stages": stages}

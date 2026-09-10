@@ -63,6 +63,7 @@
       selectedHostId: null,
       selectedLinkId: null,
       focusHostId: null,
+      promoteShellId: null,      /* Shell 管理 →「提升为 SSH 会话」：跳转 SSH 页并预填该会话所属主机 */
     },
     ws: { online: false, retry: 0 },
     timer: { running: true, elapsedSec: 0, durationSec: 4 * 3600 },
@@ -91,7 +92,7 @@
     };
   });
 
-  /* 编排台可选工具 = 已启用且适配器已接入（MS4 仅 chisel；其余为下线状态） */
+  /* 编排台可选工具 = 已启用且适配器已接入（status=online：chisel / frp / Neo-reGeorg） */
   const toolOptions = computed(() => (state.tools || []).filter((t) => t.enabled));
 
   const clockText = computed(() => {
@@ -236,6 +237,7 @@
       title: '执行',
       items: [
         { key: 'shell', label: 'Shell 管理', icon: 'terminal' },
+        { key: 'ssh', label: 'SSH 会话', icon: 'key' },
         { key: 'recon', label: '资产探测', icon: 'radar' },
         { key: 'reverse', label: '反弹 Shell', icon: 'share' },
         { key: 'files', label: '文件管理', icon: 'folder' },
@@ -265,6 +267,7 @@
   function navBadge(key) {
     if (key === 'asset') return state.hosts.filter((h) => !h.isLocal).length || '';
     if (key === 'shell') return state.shells.filter((s) => s.alive).length || '';
+    if (key === 'ssh') return state.shells.filter((s) => s.kind === 'ssh').length || '';
     if (key === 'proxy') return state.links.filter((l) => l.status === 'alive').length || '';
     if (key === 'flag') return state.flags.length || '';
     if (key === 'cred') return state.creds.length || '';
@@ -1407,7 +1410,8 @@
   function reverseRegister(opts) {
     if (!hasApi) return Promise.resolve({ ok: false, stage: 'offline', error: '后端不可用（请启动 python -m pivothub）' });
     return PivotAPI.post('/api/shells/reverse/register', {
-      projectId: state.projectId, listenerId: opts.listenerId, hostId: opts.hostId,
+      projectId: state.projectId, listenerId: opts.listenerId, hostId: opts.hostId || '',
+      hostIp: opts.hostIp || '',
       type: opts.type || '反弹 Shell', autoCollect: opts.autoCollect !== false,
     }).then((out) => {
       if (out && out.ok && out.shell && !state.shells.some((s) => s.id === out.shell.id)) {
@@ -1434,6 +1438,27 @@
       })
       .catch((e) => {
         toast('保存代理工具设置失败：' + String((e && e.message) || e), 'err');
+        if (done) done(false);
+      });
+  }
+
+  /* ---------- 阶段自定义（PUT /api/stages，A12） ----------
+     项目级阶段名：Flag 墙分阶段统计与下拉的数据源；空列表回落默认。 */
+  function saveStages(stages, done) {
+    if (!apiMode) {
+      toast('后端不可用：阶段设置未保存', 'err');
+      if (done) done(false);
+      return;
+    }
+    PivotAPI.put('/api/stages?projectId=' + encodeURIComponent(state.projectId),
+      { projectId: state.projectId, stages: stages || [] })
+      .then((out) => {
+        if (out && Array.isArray(out.stages)) replaceArr(state.stageNames, out.stages);
+        toast('阶段名已更新', 'ok');
+        if (done) done(true);
+      })
+      .catch((e) => {
+        toast('保存阶段设置失败：' + String((e && e.message) || e), 'err');
         if (done) done(false);
       });
   }
@@ -1536,6 +1561,72 @@
     if (!hasApi || !jobId) return Promise.resolve({ ok: false });
     return PivotAPI.post('/api/recon/scan/jobs/' + encodeURIComponent(jobId) + '/cancel')
       .catch(() => ({ ok: false }));
+  }
+
+  /* ---------- 线索检索 / 应用指纹 / 目录发现（A2 / A9 / A10） ----------
+     全部经会话层在目标侧真实执行；失败如实返回 {ok:false,error}，不伪造结果。 */
+
+  /* 配置文件线索检索（POST /api/clues/scan）：一键 grep 常见目录找口令 / 连接串 / Flag */
+  function cluesScan(shellId, opts) {
+    if (!hasApi) return Promise.resolve({ ok: false, error: '后端不可用（请启动 python -m pivothub）' });
+    return PivotAPI.post('/api/clues/scan', Object.assign({ shellId: shellId }, opts || {}))
+      .catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+  }
+
+  /* 内网应用指纹探测（POST /api/fingerprint/scan）：Shiro / Jenkins / Nacos / Registry 等 */
+  function fingerprintScan(shellId, targets, opts) {
+    if (!hasApi) return Promise.resolve({ ok: false, error: '后端不可用（请启动 python -m pivothub）' });
+    return PivotAPI.post('/api/fingerprint/scan',
+      Object.assign({ shellId: shellId, targets: targets || [] }, opts || {}))
+      .catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+  }
+
+  /* 目录 / 上下文发现（POST /api/fingerprint/dirs）：发现非 ROOT context、管理台、源码备份 */
+  function fingerprintDirs(shellId, baseUrls, opts) {
+    if (!hasApi) return Promise.resolve({ ok: false, error: '后端不可用（请启动 python -m pivothub）' });
+    return PivotAPI.post('/api/fingerprint/dirs',
+      Object.assign({ shellId: shellId, baseUrls: baseUrls || [] }, opts || {}))
+      .catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+  }
+
+  /* 回连端口矩阵（POST /api/shells/{id}/probe/callback）：对攻击机逐端口实测能否回连 */
+  function shellProbeCallback(shellId, opts) {
+    if (!hasApi) return Promise.resolve({ ok: false, error: '后端不可用（请启动 python -m pivothub）' });
+    return PivotAPI.post('/api/shells/' + encodeURIComponent(shellId) + '/probe/callback',
+      Object.assign({ projectId: state.projectId }, opts || {}))
+      .catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+  }
+
+  /* SSH 会话纳管（POST /api/shells/ssh，A7）：真实连接测试通过才落库，成功即并入 state.shells */
+  function sshCreate(opts) {
+    if (!hasApi) return Promise.resolve({ ok: false, stage: 'offline', error: '后端不可用（请启动 python -m pivothub）' });
+    const body = Object.assign({ projectId: state.projectId }, opts || {});
+    return PivotAPI.post('/api/shells/ssh', body).then((out) => {
+      if (out && out.ok && out.shell && !state.shells.some((s) => s.id === out.shell.id)) {
+        state.shells.push(out.shell);
+      }
+      return out || { ok: false, stage: 'unknown', error: '空响应' };
+    }).catch((e) => ({ ok: false, stage: 'request', error: String((e && e.message) || e) }));
+  }
+
+  /* Flag 修改 / 删除（PATCH / DELETE /api/flags/{id}，A12） */
+  function updateFlag(flagId, patch) {
+    if (!hasApi) return Promise.resolve(null);
+    return PivotAPI.patch('/api/flags/' + encodeURIComponent(flagId), patch || {})
+      .then((item) => {
+        const i = state.flags.findIndex((f) => f.id === item.id);
+        if (i >= 0) state.flags.splice(i, 1, item); else state.flags.push(item);
+        return item;
+      }).catch(() => null);
+  }
+  function removeFlag(flagId) {
+    if (!hasApi) return Promise.resolve(null);
+    return PivotAPI.del('/api/flags/' + encodeURIComponent(flagId))
+      .then((out) => {
+        const i = state.flags.findIndex((f) => f.id === flagId);
+        if (i >= 0) state.flags.splice(i, 1);
+        return out || { deleted: flagId };
+      }).catch(() => null);
   }
 
   /* ---------- 主机 / 凭据 / Flag ---------- */
@@ -1983,13 +2074,14 @@
     shellPlatform, sendToTerminalText,
     fileStateFor, cwdPath, refreshFileEntries, cdInto, cdTo, cdUp, cdIndex, fileEdit, downloadFile,
     testLink, restartLink, stopLink, removeLink,
-    saveAttack, saveAttackFor, netinfo, saveTools, deployLink, relayPlan, probeShell,
+    saveAttack, saveAttackFor, netinfo, saveTools, saveStages, deployLink, relayPlan, probeShell,
     reverseListen, reverseListeners, reverseRestoreListeners, reverseRegister, reverseCloseListener, reverseCloseAll,
     dbList, dbCreate, dbDelete, dbTest, dbQuery, dbTables, dbSchema,
     pluginsList, pluginInstall, pluginToggle, pluginUninstall,
     privescRules, privescScan, execOn, shellEscalate, shellEscalateClear,
     reconScanStream, reconScanJob, reconScanCancel,
-    addHost, removeHost, importScan, addCred, addFlag, addNote,
+    cluesScan, fingerprintScan, fingerprintDirs, shellProbeCallback, sshCreate,
+    addHost, removeHost, importScan, addCred, addFlag, updateFlag, removeFlag, addNote,
     buildMarkdown, init, toggleTimer, rid, sleep,
     saveNodePos, refreshState, isApiMode: () => apiMode,
     readFile, saveFileEdit, closeFileEdit, uploadFile, pickAndUpload, createProject, deleteProject,

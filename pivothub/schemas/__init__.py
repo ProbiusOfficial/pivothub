@@ -9,10 +9,10 @@ from __future__ import annotations
 from .project import ProjectOut, ProjectBrief
 from .attack import AttackIn, AttackOut
 from .host import HostOut, HostIn, IfaceIn, ScanImportIn, PositionIn
-from .shell import ShellOut, ShellIn
+from .shell import ShellOut, ShellIn, SshIn
 from .link import LinkOut
 from .credential import CredOut, CredIn
-from .flag import FlagOut, FlagIn
+from .flag import FlagOut, FlagIn, FlagPatch
 from .timeline import TimelineOut, NoteIn
 from .tool import ToolOut, ToolsIn
 from .state import StateOut, NewId
@@ -21,10 +21,10 @@ __all__ = [
     "ProjectOut", "ProjectBrief",
     "AttackIn", "AttackOut",
     "HostOut", "HostIn", "IfaceIn", "ScanImportIn", "PositionIn",
-    "ShellOut", "ShellIn",
+    "ShellOut", "ShellIn", "SshIn",
     "LinkOut",
     "CredOut", "CredIn",
-    "FlagOut", "FlagIn",
+    "FlagOut", "FlagIn", "FlagPatch",
     "TimelineOut", "NoteIn",
     "ToolOut", "ToolsIn",
     "StateOut", "NewId",

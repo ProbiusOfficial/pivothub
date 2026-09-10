@@ -8,6 +8,7 @@ from .base import ExecResult, FileEntry, SessionBase, SessionError
 from .registry import get_session
 from .http_shell import HttpShellSession
 from .local import LocalSession
+from .ssh import SshSession, parse_ssh_url
 from .reverse import (
     SERVICE as REVERSE_SERVICE,
     ReverseShellChannel,
@@ -17,6 +18,6 @@ from .reverse import (
 
 __all__ = [
     "ExecResult", "FileEntry", "SessionBase", "SessionError",
-    "get_session", "HttpShellSession", "LocalSession",
+    "get_session", "HttpShellSession", "LocalSession", "SshSession", "parse_ssh_url",
     "REVERSE_SERVICE", "ReverseShellChannel", "ReverseShellListener", "ReverseShellService",
 ]

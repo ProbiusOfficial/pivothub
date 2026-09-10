@@ -25,6 +25,10 @@
     template: '', extraArgs: '', timeoutS: 300,
     selected: {},                    /* ip -> bool */
     importing: false,
+    /* ④ 线索检索 / 应用指纹 / 目录发现（A2 / A9 / A10），全部经会话层真实执行 */
+    clue: { busy: false, result: null, error: '' },
+    fp: { busy: false, result: null, error: '', targets: '' },
+    dir: { busy: false, result: null, error: '', urls: '' },
   });
   let pollTimer = null;
   let pollTick = 0;
@@ -317,6 +321,106 @@
         if (s && s.template && !R.template) R.template = s.template;
       });
 
+      /* ---------- ④ 线索检索 / 应用指纹 / 目录发现 ---------- */
+      const WEB_PORTS = [80, 8080, 8443, 8000, 7001, 8848, 9000, 9080, 5000, 8888];
+      const HTTPS_PORTS = [443, 8443];
+      /* 从扫描结果 / 已知主机推导候选 Web 目标，供指纹与目录发现一键填入。
+         指纹服务要求完整 URL（http:// 或 https:// 开头），故这里直接补全 scheme。 */
+      function suggestTargets() {
+        const out = [];
+        const add = (ip, port) => {
+          const p = Number(port);
+          if (WEB_PORTS.indexOf(p) < 0) return;
+          const scheme = HTTPS_PORTS.indexOf(p) >= 0 ? 'https' : 'http';
+          const url = scheme + '://' + ip + (p === 80 || p === 443 ? '' : ':' + p);
+          if (out.indexOf(url) < 0) out.push(url);
+        };
+        const res = scanResult.value;
+        if (res && res.hosts) {
+          res.hosts.forEach((h) => (h.ports || []).forEach((p) => add(h.ip, p)));
+        }
+        S.state.hosts.forEach((h) => (h.ports || []).forEach((p) => add(h.ip, p)));
+        return out;
+      }
+      function fillTargets() {
+        const t = suggestTargets();
+        if (!t.length) { S.toast('未从扫描结果/资产表推导到 Web 目标，请手动填写', 'warn'); return; }
+        R.fp.targets = t.join(', ');
+        R.dir.urls = t.join(', ');
+        S.toast('已从扫描结果填入 ' + t.length + ' 个 Web 目标', 'ok');
+      }
+      function parseList(text) {
+        return String(text || '').split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+      }
+
+      function runClues() {
+        if (!R.shellId || R.clue.busy) return;
+        R.clue.busy = true; R.clue.error = ''; R.clue.result = null;
+        S.cluesScan(R.shellId, {}).then((out) => {
+          R.clue.busy = false;
+          if (!out || out.ok === false) {
+            R.clue.error = (out && out.error) || '检索失败';
+            S.toast('线索检索失败：' + R.clue.error, 'err');
+            return;
+          }
+          R.clue.result = out;
+          const n = (out.items || []).length;
+          const hits = (out.items || []).reduce((a, i) => a + ((i.hits || []).length), 0);
+          S.toast(n ? ('线索检索：命中 ' + n + ' 个文件 / ' + hits + ' 条') : '线索检索完成：未命中', n ? 'ok' : 'warn');
+          if (n) S.addEvent('recon', '配置文件线索检索：命中 ' + n + ' 个文件', {
+            hostId: currentShell.value && currentShell.value.hostId,
+            detail: '共 ' + hits + ' 条命中（口令 / 连接串 / 私钥 / Flag）',
+          });
+        });
+      }
+
+      function runFingerprint() {
+        const targets = parseList(R.fp.targets);
+        if (!R.shellId) { S.toast('请先选择会话', 'err'); return; }
+        if (!targets.length) { S.toast('请填写要探测的 host:port（可点「从扫描结果填入」）', 'err'); return; }
+        if (R.fp.busy) return;
+        R.fp.busy = true; R.fp.error = ''; R.fp.result = null;
+        S.fingerprintScan(R.shellId, targets, {}).then((out) => {
+          R.fp.busy = false;
+          if (!out || out.ok === false) {
+            R.fp.error = (out && out.error) || '指纹探测失败';
+            S.toast('指纹探测失败：' + R.fp.error, 'err');
+            return;
+          }
+          R.fp.result = out;
+          const hit = (out.items || []).filter((i) => i.app);
+          S.toast(hit.length ? ('指纹命中 ' + hit.length + ' 个应用') : '指纹探测完成：未识别到已知应用',
+            hit.length ? 'ok' : 'warn');
+          if (hit.length) S.addEvent('recon', '应用指纹：' + hit.map((i) => i.app).join(' / '), {
+            hostId: currentShell.value && currentShell.value.hostId,
+            detail: hit.map((i) => i.target + ' → ' + i.app + (i.version ? ' ' + i.version : '')).join('; '),
+          });
+        });
+      }
+
+      function runDirs() {
+        const urls = parseList(R.dir.urls);
+        if (!R.shellId) { S.toast('请先选择会话', 'err'); return; }
+        if (!urls.length) { S.toast('请填写 base URL（可点「从扫描结果填入」）', 'err'); return; }
+        if (R.dir.busy) return;
+        R.dir.busy = true; R.dir.error = ''; R.dir.result = null;
+        S.fingerprintDirs(R.shellId, urls, {}).then((out) => {
+          R.dir.busy = false;
+          if (!out || out.ok === false) {
+            R.dir.error = (out && out.error) || '目录发现失败';
+            S.toast('目录发现失败：' + R.dir.error, 'err');
+            return;
+          }
+          R.dir.result = out;
+          const n = (out.items || []).length;
+          S.toast(n ? ('目录发现：命中 ' + n + ' 个路径') : '目录发现完成：无命中', n ? 'ok' : 'warn');
+          if (n) S.addEvent('recon', '目录/上下文发现：命中 ' + n + ' 个路径', {
+            hostId: currentShell.value && currentShell.value.hostId,
+            detail: (out.items || []).slice(0, 8).map((i) => i.status + ' ' + i.url).join('; '),
+          });
+        });
+      }
+
       /* 页面切回来时若任务仍在跑，恢复轮询 */
       if (scanning.value && live.jobId) startPoll();
 
@@ -328,6 +432,7 @@
         portText, titleText,
         loadEnv, loadScanners, pickScanner, runScan, cancelScan, openTerminal, clearLog,
         toggleAll, importSelected, fmtSize,
+        fillTargets, runClues, runFingerprint, runDirs,
       };
     },
   };

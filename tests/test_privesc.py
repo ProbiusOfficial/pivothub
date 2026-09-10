@@ -77,12 +77,16 @@ def test_kernel_rule_skipped_on_other_kernel():
 
 
 def test_crlf_output_matches_anchored_rules():
-    """反弹 PTY 回显是 CRLF：锚点规则（^/etc/passwd$）不能因此漏报。"""
+    """反弹 PTY 回显是 CRLF：锚点规则（^/etc/passwd$）不能因此漏报。
+
+    注意：/usr/bin/mount 是 Debian/Ubuntu 默认 SUID，应被排除、不触发 linux-suid；
+    这里用 /usr/bin/find（默认无 SUID，靶场常见误加项）来验证 CRLF 锚点仍能命中。
+    """
     from pivothub.service.privesc import match_rules
 
     crlf = ("uid=1000(tomcat9) gid=1000(tomcat9)\r\n"
             "Linux archive-web 6.1.0-26-amd64 x86_64 GNU/Linux\r\n"
-            "/usr/bin/mount\r\n/etc/passwd\r\n")
+            "/usr/bin/mount\r\n/usr/bin/find\r\n/etc/passwd\r\n")
     lf = crlf.replace("\r\n", "\n")
     ids_crlf = {f["id"] for f in match_rules("linux", crlf)}
     ids_lf = {f["id"] for f in match_rules("linux", lf)}
@@ -145,3 +149,52 @@ def test_escalation_endpoints(client, sandbox_project):
     assert client.post(f"/api/shells/{sid}/escalation", json={"user": ""}).status_code == 400
 
     assert client.delete(f"/api/shells/{sid}/escalation").json()["escalatedUser"] == ""
+
+
+def test_linux_suid_default_only_does_not_false_positive():
+    """回归（P1-2）：证据里只有 Debian/Ubuntu 默认即带 SUID 的清单时，不得命中 linux-suid。"""
+    from pivothub.service.privesc import match_rules
+
+    defaults = [
+        "/usr/bin/mount", "/usr/bin/umount", "/usr/bin/su", "/usr/bin/passwd",
+        "/usr/bin/chsh", "/usr/bin/chfn", "/usr/bin/gpasswd", "/usr/bin/newgrp",
+        "/usr/bin/pkexec", "/usr/bin/fusermount", "/usr/bin/fusermount3",
+        "/usr/bin/ping", "/usr/bin/traceroute", "/usr/bin/ntfs-3g",
+        "/usr/bin/snap-confine", "/usr/bin/vmware-user-suid-wrapper",
+    ]
+    output = "uid=1000(tomcat) gid=1000(tomcat) groups=33(tomcat)\n" + "\n".join(defaults) + "\n"
+    ids = {f["id"] for f in match_rules("linux", output)}
+    assert "linux-suid" not in ids
+
+
+def test_linux_suid_find_with_suid_must_hit():
+    """靶场考点：/usr/bin/find 默认无 SUID，被运维误加 SUID → 必须命中 linux-suid。"""
+    from pivothub.service.privesc import match_rules
+
+    output = "uid=1000(tomcat) gid=1000(tomcat)\n/usr/bin/find\n"
+    findings = match_rules("linux", output)
+    suid = next((f for f in findings if f["id"] == "linux-suid"), None)
+    assert suid is not None, "应命中 linux-suid"
+    assert suid["evidence"] == "/usr/bin/find"
+    # 排除名单里的 mount 不应污染证据
+    assert "mount" not in suid["evidence"]
+
+
+def test_rules_without_verify_are_never_verified():
+    """无 verify/expect 的规则匹配结果 verified 必须为 False；有验证步骤的规则才是 verifiable。"""
+    from pivothub.service.privesc import match_rules
+
+    findings = match_rules("linux", LINUX_SAMPLE)
+    by_id = {f["id"]: f for f in findings}
+
+    # linux-docker-group 无 verify/expect：verifiable 为 False，verified 恒为 False
+    assert by_id["linux-docker-group"]["verifiable"] is False
+    assert by_id["linux-docker-group"]["verified"] is False
+
+    # linux-passwd-writable / linux-suid 已补 verify+expect：verifiable 为 True，
+    # 但匹配阶段尚未在靶机实跑，verified 仍为 False（不能冒称「已执行」）
+    assert by_id["linux-passwd-writable"]["verifiable"] is True
+    assert by_id["linux-passwd-writable"]["verified"] is False
+    assert by_id["linux-suid"]["verifiable"] is True
+    assert by_id["linux-suid"]["verify"] and by_id["linux-suid"]["expect"]
+    assert by_id["linux-suid"]["verified"] is False

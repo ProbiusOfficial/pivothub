@@ -64,13 +64,13 @@
   "tools": [
     {
       "name": "frp",
-      "note": "反向 TCP，稳定首选",
+      "note": "反向 TCP（frps+frpc），稳定首选",
       "supports": [
         "反向",
         "正向"
       ],
       "type": "Socks5",
-      "status": "offline"
+      "status": "online"
     },
     {
       "name": "nps",
@@ -83,12 +83,12 @@
     },
     {
       "name": "Neo-reGeorg",
-      "note": "仅 HTTP 出网时的最优解",
+      "note": "仅 HTTP 出网时的最优解（neoreg 客户端 + tunnel 文件）",
       "supports": [
         "反向"
       ],
       "type": "HTTP 隧道",
-      "status": "offline"
+      "status": "online"
     },
     {
       "name": "EW",
@@ -145,7 +145,10 @@
     "JSP 自定义马",
     "ASP 一句话马",
     "ASPX 一句话马",
-    "ASPX 自定义马"
+    "ASPX 自定义马",
+    "Python 命令回显端点",
+    "Java 命令回显端点",
+    "自定义参数回显端点（cmdhttp）"
   ],
   "encoders": [
     "none",

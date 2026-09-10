@@ -1,4 +1,4 @@
-"""代理工具目录出参 / 启用集入参（MS4 仅 chisel 已接入，其余为下线状态）。"""
+"""代理工具目录出参 / 启用集入参（status=online 的工具才可启用）。"""
 
 from __future__ import annotations
 

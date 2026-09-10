@@ -128,7 +128,7 @@ def default_enabled_tools() -> list[str]:
 
 
 def get_tools(db, project_id: str) -> list[dict]:
-    """目录 + 项目级启用标记；下线工具永远 enabled=False（MS4 仅 chisel）。"""
+    """目录 + 项目级启用标记；下线工具永远 enabled=False（仅 status=online 可启用）。"""
     from .models import Project
 
     catalog = tool_catalog()
@@ -158,11 +158,56 @@ def set_tools(db, project_id: str, enabled: list[str]) -> list[dict]:
         raise ValueError(f"未知工具: {', '.join(unknown)}")
     offline = [n for n in enabled if catalog[n].get("status") != "online"]
     if offline:
-        raise ValueError(f"工具适配器尚未接入，无法启用: {', '.join(offline)}（当前仅 chisel）")
+        online = [n for n, t in catalog.items() if t.get("status") == "online"]
+        raise ValueError(
+            f"工具适配器尚未接入，无法启用: {', '.join(offline)}"
+            f"（当前已接入: {', '.join(online) or '无'}）")
     settings = dict(p.settings or {})
     settings["tools"] = {"enabled": sorted(set(enabled))}
     p.settings = settings
     return get_tools(db, project_id)
+
+
+def default_stages() -> list[str]:
+    """默认阶段名（data/meta.json → stageNames）。"""
+    return [str(x) for x in load_meta().get("stageNames", [])]
+
+
+def get_stages(db, project_id: str) -> list[str]:
+    """项目级阶段名：项目 settings.stages 非空则以它为准，否则回落到默认。
+
+    阶段名用于 Flag 墙的分阶段统计与下拉；允许项目自定义（A12），
+    存 `Project.settings["stages"]`，不新增数据库列。
+    """
+    from .models import Project
+
+    p = db.get(Project, project_id)
+    if p is not None:
+        cfg = (p.settings or {}).get("stages")
+        if isinstance(cfg, list) and cfg:
+            return [str(x) for x in cfg]
+    return default_stages()
+
+
+def set_stages(db, project_id: str, stages: list[str]) -> list[str]:
+    """写入项目级阶段名（去重保序、去空白）。空列表 = 恢复默认。"""
+    from .models import Project
+
+    p = db.get(Project, project_id)
+    if p is None:
+        raise KeyError(project_id)
+    clean: list[str] = []
+    for s in (stages or []):
+        name = str(s).strip()
+        if name and name not in clean:
+            clean.append(name)
+    settings = dict(p.settings or {})
+    if clean:
+        settings["stages"] = clean
+    else:
+        settings.pop("stages", None)
+    p.settings = settings
+    return get_stages(db, project_id)
 
 
 def load_plugin_dir(sub: str) -> list[dict]:
@@ -224,6 +269,7 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "hops": "JSON",
         "pids": "JSON",
     },
+    "flags": {"note": "TEXT"},
 }
 
 
@@ -348,7 +394,8 @@ def _seed(db: Session) -> None:
         db.add(
             models.Flag(
                 id=f["id"], project_id=proj["id"], host_id=f["hostId"], stage=f["stage"],
-                value=f["value"], submitted=bool(f.get("submitted")), created_at=ts,
+                value=f["value"], submitted=bool(f.get("submitted")),
+                note=f.get("note", ""), created_at=ts,
             )
         )
 

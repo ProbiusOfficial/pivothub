@@ -118,17 +118,49 @@
         }, 1500);
       }
 
-      function register(me) {
+      /* 【A5】手动登记：自动登记失败时的兜底（原实现只有自动一条路，失败就没辙） */
+      const manualHostId = ref('');
+      const hosts = computed(() => S.state.hosts || []);
+      let autoTries = 0;
+
+      function listenerState(l) {
+        if (l.error) return '监听失败';
+        if (l.connected) return '已回连·未登记';
+        return '等待回连';
+      }
+      function listenerPeer(l) {
+        return (l.peer && l.peer[0]) ? (l.peer[0] + ':' + (l.peer[1] || '')) : '—';
+      }
+
+      function register(me, manual) {
+        if (registering) return;
+        const meId = (me && me.id) || (listener.value && listener.value.id);
+        if (!meId) { push('err', '登记失败：监听不存在'); return; }
+        const live = listeners.value.find((x) => x.id === meId) || me || {};
+        if (!live.connected) { push('warn', '该监听尚无回连，无法登记（先把靶机反弹起来）'); return; }
         registering = true;
-        const target = S.state.shells.find((x) => x.id === shellId.value);
-        push('ok', '收到回连 ' + (((me.peer || [])[0]) || '?') + ' → 登记为面板会话…');
+        const target = S.state.shells.find((x) => x.id === shellId.value) || {};
+        const peerIp = (live.peer || [])[0] || '';
+        const hostId = manual ? (manualHostId.value || '') : (target.hostId || manualHostId.value || '');
+        push('ok', '收到回连 ' + (peerIp || '?') + ' → 登记为面板会话…'
+          + (manual ? '（手动登记）' : ''));
         S.reverseRegister({
-          listenerId: me.id,
-          hostId: target ? target.hostId : '',
+          listenerId: meId,
+          hostId: hostId,
+          hostIp: peerIp,          /* 后端按 hostId → 同 IP 主机 → hostIp 自动建主机 */
           type: '反弹 Shell（' + (PAYLOADS[kind.value] || {}).label + '）',
         }).then((out) => {
           registering = false;
-          if (!out || !out.ok) { push('err', '登记失败：' + ((out && out.error) || '未知原因')); return; }
+          if (!out || !out.ok) {
+            autoTries += 1;
+            const why = (out && out.error) || '未知原因';
+            push('err', '登记失败：' + why);
+            if (!manual && autoTries >= 2) {
+              push('warn', '自动登记已连续失败 ' + autoTries + ' 次：请在上方「登记主机」下拉里手动指定主机后点「登记为会话」');
+            }
+            return;
+          }
+          autoTries = 0;
           push('ok', '✓ 已登记会话 ' + out.shell.id + ' · ' + out.shell.url + ' · ' + out.shell.latency + 'ms');
           S.toast('反弹 Shell 回连成功，已登记为面板会话', 'ok');
           running.value = false;
@@ -219,6 +251,7 @@
         wsShells, reverseShells, kinds, payload, failedListeners,
         start, send, closeOne, closeAll, refreshListeners, retryRestore, useDetected,
         openSession, copyPayload,
+        register, manualHostId, hosts, listenerState, listenerPeer,
         ipOf: S.ipOf, icon: global.icon,
       };
     },

@@ -6,7 +6,11 @@
 
 - `match`：对「一次性采集命令的真实回显」做正则匹配（空串表示只看 facts）；
 - `facts.kernel`：内核版本正则，不匹配则整条规则跳过；
+- `excludeBasename`：basename 黑名单（如 SUID 的 `mount`/`umount`）。命中行
+  若 basename 落在黑名单里，视为发行版默认状态而剔除；所有命中行都被剔除时规则整体不命中。
 - 命中时返回证据行（回显里那一行），**只给建议与命令，不做任何自动利用**。
+- `verify`/`expect`：可选的验证步骤。只有同时具备两者的规则才是 `verifiable`；
+  匹配结果 `verified` 恒为 False（尚未在靶机实跑），无验证步骤的规则永远不得标记为「已执行」。
 """
 
 from __future__ import annotations
@@ -73,16 +77,28 @@ def parse_facts(output: str, platform: str) -> dict[str, Any]:
     return facts
 
 
-def _evidence(output: str, rx: re.Pattern) -> str:
-    """命中处的整行（截断 200 字符），作为「为什么命中」的证据。"""
-    m = rx.search(output)
-    if not m:
-        return ""
-    start = output.rfind("\n", 0, m.start()) + 1
-    end = output.find("\n", m.end())
-    if end < 0:
-        end = len(output)
-    return output[start:end].strip()[:200]
+def _evidence(output: str, rx: re.Pattern, exclude_basenames: set[str] | None = None) -> str:
+    """命中处的整行（截断 200 字符），作为「为什么命中」的证据。
+
+    `exclude_basenames`：默认即带 SUID 的 basename 黑名单（如 mount/umount）。
+    若提供，则跳过 basename 落在该名单里的命中行——这些只是发行版默认状态，
+    并非真正的可利用线索，必须排除以免误报。返回第一条「非默认」的命中行；
+    若所有命中行都被排除则返回空串（调用方据此判定规则整体未命中）。
+    """
+    for m in rx.finditer(output):
+        start = output.rfind("\n", 0, m.start()) + 1
+        end = output.find("\n", m.end())
+        if end < 0:
+            end = len(output)
+        line = output[start:end].strip()
+        if not line:
+            continue
+        if exclude_basenames:
+            base = line.rsplit("/", 1)[-1].split()[0].lower()
+            if base in exclude_basenames:
+                continue
+        return line[:200]
+    return ""
 
 
 def match_rules(platform: str, output: str, facts: dict | None = None) -> list[dict]:
@@ -104,6 +120,9 @@ def match_rules(platform: str, output: str, facts: dict | None = None) -> list[d
             except re.error:
                 continue
         pattern = rule.get("match") or ""
+        #: 默认即带 SUID 的 basename 黑名单（Debian/Ubuntu 出厂状态），用于过滤误报。
+        #: 仅对声明了该字段的规则生效（当前为 linux-suid）。
+        exclude = {b.lower() for b in (rule.get("excludeBasename") or [])}
         evidence = ""
         if pattern:
             try:
@@ -112,7 +131,12 @@ def match_rules(platform: str, output: str, facts: dict | None = None) -> list[d
                 continue
             if not rx.search(output):
                 continue
-            evidence = _evidence(output, rx)
+            evidence = _evidence(output, rx, exclude or None)
+            # 若规则声明了默认项黑名单，且所有命中行都是默认项 → 视为未命中（不误报）。
+            if exclude and evidence == "":
+                continue
+        #: 规则是否自带「验证步骤」：只有 verify 与 expect 同时存在的规则才可被执行后验证。
+        verifiable = bool(rule.get("verify") and rule.get("expect"))
         out.append({
             "id": rule.get("id", ""),
             "name": rule.get("name", ""),
@@ -127,6 +151,11 @@ def match_rules(platform: str, output: str, facts: dict | None = None) -> list[d
             #: 可选：验证成功后可设置的提权上下文（后续命令以该用户执行）
             "escalate": rule.get("escalate") or {},
             "evidence": evidence,
+            #: 是否已「执行并验证通过」。匹配阶段只是静态命中，尚未在靶机上跑过 verify，
+            #: 因此一律为 False；且只有 verifiable 的规则才可能在后续被置 True——
+            #: 没有验证步骤的规则永远无法被标记为「已执行/已验证」，前端据此避免误报。
+            "verified": False,
+            "verifiable": verifiable,
         })
     out.sort(key=lambda x: (-x["reliability"], x["name"]))
     return out

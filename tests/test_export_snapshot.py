@@ -15,6 +15,11 @@ def test_export_md_snapshot(client, project_id):
     # 关键真实数据进入报告（新拓扑：入口机 192.168.100.2）
     assert "192.168.100.2" in md
     assert "flag{dmz_upload_pwn3d_7a91}" in md
+    # 拓扑段已真实化：攻击端 IP 取自全局设置，不再写死「攻击端 127.0.0.1」桩
+    assert "攻击端 127.0.0.1" not in md
+    # 拓扑段应渲染出攻击机与主机树（攻击端标记为根）
+    assert "攻击端" in md
+    assert "✓已控" in md or "·未控" in md
     # 明文：凭据不再打码（用户指令，见 ASSUMPTIONS A-23）
     assert "root123" in md
     assert "***" not in md

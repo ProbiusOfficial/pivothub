@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import html as _html
+from collections import deque
 from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from ..db import get_attack
 from ..models import Credential, Flag, Host, Project, ProxyLink, Shell, TimelineEvent
 from ..service.statlib import project_stats
 from ..service.timeline import segments_of
@@ -19,6 +21,64 @@ DEFAULT_OPTS = {"topo": True, "chain": True, "timeline": True, "creds": True, "f
 def _ip_of(hosts_by_id: dict, host_id: str | None) -> str:
     h = hosts_by_id.get(host_id)
     return h.ip if h else "—"
+
+
+def _layer_num(h: Host) -> int:
+    """主机层级的数字（L1→1 / L2→2 …），无法解析时兜底为 99。"""
+    try:
+        return int(str(h.layer).replace("L", ""))
+    except ValueError:
+        return 99
+
+
+def _topo_tree(hosts: list, links: list, attack_ip: str) -> str:
+    """推导「攻击机 → 各层主机」的 ASCII 树。
+
+    层级依据：从攻击端本机节点沿 links（from_host → to_host）做 BFS 定深度；
+    未连通的主机按自身 layer 数字兜底。每台主机带 IP、主机名（若有）、层级、是否已控。
+    """
+    lines: list[str] = []
+    local = next((h for h in hosts if h.is_local), None)
+
+    if attack_ip:
+        root = f"攻击端 {attack_ip}"
+    elif local is not None:
+        root = f"攻击端 {local.ip}"
+    else:
+        root = "攻击端（地址未配置）"
+    if local is not None and local.segment:
+        root += f"  [{local.segment}]"
+    lines.append(root)
+
+    depth: dict[str, int] = {}
+    if local is not None:
+        depth[local.id] = 0
+        children: dict[str, list[str]] = {}
+        for l in links:
+            children.setdefault(l.from_host_id, []).append(l.to_host_id)
+        q = deque([local.id])
+        while q:
+            cur = q.popleft()
+            for nxt in children.get(cur, []):
+                if nxt not in depth:
+                    depth[nxt] = depth[cur] + 1
+                    q.append(nxt)
+
+    leaf = [h for h in hosts if not h.is_local]
+    for h in leaf:
+        if h.id not in depth:
+            depth[h.id] = _layer_num(h)
+    leaf.sort(key=lambda h: (depth.get(h.id, 99), h.ip))
+
+    for h in leaf:
+        indent = "  " * depth.get(h.id, 1)
+        name = f" {h.hostname}" if h.hostname else ""
+        owned = "✓已控" if h.owned else "·未控"
+        lines.append(f"{indent}└─ {h.ip}{name}  [{h.layer}] {owned}")
+
+    if not leaf:
+        lines.append("  （暂无已登记主机）")
+    return "\n".join(lines)
 
 
 def build_markdown(db: Session, project_id: str, opts: dict | None = None) -> str:
@@ -48,9 +108,14 @@ def build_markdown(db: Session, project_id: str, opts: dict | None = None) -> st
     out += f"| Flag | {len(flags)} |\n\n"
 
     if o["topo"]:
-        out += "## 1. 网络拓扑\n\n```\n攻击端 127.0.0.1\n"
-        for l in links:
-            out += f"  └─[{l.tool} {l.direction} {l.local_socks or ''}]→ {_ip_of(by_id, l.from_host_id)}  ⇒  {l.target_segment or ''}\n"
+        # 攻击机 IP 复用全局设置（GET/PUT /api/attack 的取值函数），取不到给出明确降级
+        attack = get_attack(db, project_id)
+        attack_ip = (attack.get("ip") or "").strip()
+        out += "## 1. 网络拓扑\n\n```\n"
+        if attack_ip:
+            out += _topo_tree(hosts, links, attack_ip) + "\n"
+        else:
+            out += "攻击机地址未配置（请到「攻击机网络」设置后重新导出）\n"
         out += "```\n\n" + ("![拓扑快照](screenshots/topology.png)\n\n" if o["placeholder"] else "")
 
     if o["chain"]:
@@ -142,7 +207,8 @@ def build_json(db: Session, project_id: str) -> str:
         ],
         "flags": [
             {"id": f.id, "hostId": f.host_id, "stage": f.stage, "value": f.value,
-             "submitted": f.submitted, "time": f.created_at.strftime("%H:%M") if f.created_at else ""}
+             "submitted": f.submitted, "note": getattr(f, "note", "") or "",
+             "time": f.created_at.strftime("%H:%M") if f.created_at else ""}
             for f in flags
         ],
         "timeline": [
