@@ -129,6 +129,13 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
 
 @router.get("/projects/{project_id}/state", response_model=StateOut)
 def project_state(project_id: str, db: Session = Depends(get_db)):
+    """面板启动的第一步。空库时先兜底建默认项目再返回 —— 404 会让前端跳过
+    WS 连接（表现为「WS 连接失败 / 后端不可用」），所以这里必须自愈。"""
+    from ..db import ensure_default_project
+
+    if db.get(Project, project_id) is None:
+        if ensure_default_project(db) is not None:
+            db.commit()
     return build_state(db, project_id)
 
 

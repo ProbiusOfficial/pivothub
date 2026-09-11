@@ -12,6 +12,8 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from . import config
+from .config import DEFAULT_PROJECT_ID
+from .schemas.common import rid
 
 log = logging.getLogger("pivothub.db")
 
@@ -65,8 +67,29 @@ def _load_json(path: Path) -> Any:
         return json.load(f)
 
 
+_META_WARNED = False
+
+
 def load_meta() -> dict:
-    return _load_json(config.DATA_DIR / "meta.json")
+    """读取 data/meta.json；缺失/损坏时回退空字典（各调用点均有 .get 默认值）。
+
+    移植换机最容易丢的就是 data/ 目录 —— 这里必须容错，否则空库兜底
+    （ensure_default_project → default_attack）自身都会被 meta.json 缺失炸掉。
+    """
+    global _META_WARNED
+    try:
+        return _load_json(config.DATA_DIR / "meta.json")
+    except OSError as e:
+        if not _META_WARNED:
+            log.warning("meta.json 不可读（%s）：使用内置默认值。静态目录（马类型/编码器等）将不全，"
+                        "请检查 data/ 目录是否随项目一并复制", e)
+            _META_WARNED = True
+        return {}
+    except ValueError as e:  # JSON 损坏
+        if not _META_WARNED:
+            log.warning("meta.json 解析失败（%s）：使用内置默认值", e)
+            _META_WARNED = True
+        return {}
 
 
 def load_seed_project() -> dict:
@@ -234,7 +257,12 @@ def load_plugin_dir(sub: str) -> list[dict]:
 
 
 def init_db(seed: bool = True) -> None:
-    """建表；若库为空且 seed=True，则播种演示项目（三层内网场景）。"""
+    """建表；若库为空且 seed=True，则播种演示项目（三层内网场景）。
+
+    播种失败（移植后 data/seed_project.json 缺失/损坏等）时回退为创建
+    空白默认项目 —— **面板永远必须有一个可用项目**：前端启动第一步就是
+    拉取 /state，404 会跳过 WS 连接，整个面板看起来像「后端不可用」。
+    """
     from . import models  # noqa: F401  确保模型注册
 
     engine = get_engine()
@@ -245,9 +273,53 @@ def init_db(seed: bool = True) -> None:
     with get_session_factory()() as db:
         if db.query(models.Project).count() > 0:
             return
-        _seed(db)
-        db.commit()
-        log.info("已播种演示项目（三层内网 CTF 场景）")
+        try:
+            _seed(db)
+            db.commit()
+            log.info("已播种演示项目（三层内网 CTF 场景）")
+        except Exception:
+            db.rollback()
+            log.exception("播种演示项目失败（data/ 缺失或损坏？）——改用空白默认项目")
+            ensure_default_project(db)
+            db.commit()
+            log.info("已创建空白默认项目 %s（面板工作区兜底）", DEFAULT_PROJECT_ID)
+
+
+def ensure_default_project(db: Session):
+    """库为空时创建默认项目（含攻击端本机节点，与「新建项目」同一最小工作区）。
+
+    返回新建的 Project；库非空时不做任何事并返回 None（不替用户挑工作区）。
+    幂等：默认项目已存在时直接返回它。
+    """
+    from . import models
+    from .localinfo import iface_for, machine
+
+    existing = db.get(models.Project, DEFAULT_PROJECT_ID)
+    if existing is not None:
+        return existing
+    if db.query(models.Project).count() > 0:
+        return None
+    attack = default_attack()
+    info = machine()
+    iface = iface_for(attack["ip"]) or attack.get("iface") or ""
+    p = models.Project(
+        id=DEFAULT_PROJECT_ID, name="默认项目",
+        start_at=now().strftime("%H:%M"), duration_sec=4 * 3600, note="",
+        settings={"attack": dict(attack)},
+    )
+    db.add(p)
+    db.add(models.Host(
+        id=rid("h"), project_id=DEFAULT_PROJECT_ID, ip=attack["ip"],
+        hostname=info["hostname"], os=info["os"], layer="LOCAL",
+        segment=attack.get("segment") or "LOCAL", privilege=info["privilege"],
+        owned=True, ports=[], services=[],
+        note=f"攻击端本机（{iface or 'iface'} · {attack['ip']}）· 面板运行位置",
+        discovery="本地", is_local=True,
+        ifaces=[{"iface": iface, "ip": attack["ip"],
+                 "segment": attack.get("segment", "")}],
+    ))
+    db.flush()
+    return p
 
 
 #: 轻量迁移：老库（上一版 schema）缺少的新增列 → 直接 ALTER TABLE 补上

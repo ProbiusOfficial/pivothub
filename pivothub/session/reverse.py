@@ -51,6 +51,8 @@ class ReverseShellListener:
         self._error = ""
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        #: 通道已被 take() 取走转为会话（此时监听 socket 已关闭，不能再显示「等待回连」）
+        self.consumed = False
 
     # ---- 生命周期 ----
 
@@ -105,6 +107,7 @@ class ReverseShellListener:
         # 通道已被取走：清掉回连标记并释放监听 socket，否则端口会被这条监听一直占着
         # （表现就是「该地址端口已在监听」，休眠/重建会话后无法在同端口重开）。
         self.connected.clear()
+        self.consumed = True
         if self._sock is not None:
             try:
                 self._sock.close()
@@ -130,7 +133,8 @@ class ReverseShellListener:
 
     def to_dict(self) -> dict:
         return {"id": self.id, "bind": self.bind, "port": self.port, "label": self.label,
-                "connected": self.connected.is_set(), "peer": self._peer, "error": self._error}
+                "connected": self.connected.is_set(), "peer": self._peer, "error": self._error,
+                "consumed": self.consumed}
 
 
 class ReverseShellChannel(SessionBase):
@@ -268,9 +272,11 @@ class ReverseShellChannel(SessionBase):
         return self.exec("echo __PIVOTHUB_ALIVE__")
 
     def exec(self, cmd: str, timeout: float = 15.0) -> ExecResult:
-        from .base import apply_cmd_wrapper
+        from .base import wrap_privileged_cmd
 
-        cmd = apply_cmd_wrapper(cmd, getattr(self, "cmd_wrapper", ""))
+        # 提权上下文：走 wrap_privileged_cmd 落盘执行，避免包裹器模板引号被命令里的引号撕碎
+        cmd = wrap_privileged_cmd(cmd, getattr(self, "cmd_wrapper", ""),
+                                  platform=self.platform)
         marker = "PH_" + uuid.uuid4().hex[:10]
         start = self._begin_exec(timeout)
         t0 = time.perf_counter()

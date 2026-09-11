@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from .common import hhmm
+from .common import hhmm_utc
 
 
 class CredOut(BaseModel):
@@ -23,7 +23,7 @@ class CredOut(BaseModel):
         return cls(
             id=c.id, hostId=c.host_id, username=c.username, secret=c.secret,
             kind=c.kind, services=c.services, reuse=c.reuse, source=c.source,
-            time=hhmm(c.created_at),
+            time=hhmm_utc(c.created_at),
         )
 
 

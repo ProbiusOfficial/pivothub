@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
-from .common import hhmm
+from .common import hhmm_utc
 
 
 class FlagOut(BaseModel):
@@ -24,7 +24,7 @@ class FlagOut(BaseModel):
         return cls(
             id=f.id, hostId=f.host_id, stage=f.stage, value=f.value,
             submitted=f.submitted, note=getattr(f, "note", "") or "",
-            time=hhmm(f.created_at),
+            time=hhmm_utc(f.created_at),
         )
 
 

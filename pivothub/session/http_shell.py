@@ -17,7 +17,7 @@ from typing import Optional
 from urllib import parse as _uparse
 from urllib import request as _ureq
 
-from .base import ExecResult, FileEntry, SessionBase, SessionError, apply_cmd_wrapper, \
+from .base import ExecResult, FileEntry, SessionBase, SessionError, wrap_privileged_cmd, \
     b64e, ls_error_text, parse_ls_output
 
 EOF_MARK = "[[PIVOTHUB_EOF]]"
@@ -133,7 +133,9 @@ class HttpShellSession(SessionBase):
 
     def exec(self, cmd: str, timeout: float = 15.0) -> ExecResult:
         # 提权上下文：命中并验证成功后，后续命令都以提权用户执行
-        cmd = apply_cmd_wrapper(cmd, getattr(self, "cmd_wrapper", ""))
+        # （wrap_privileged_cmd 会规避包裹器模板的引号冲突：命令落盘后用 sh <文件> 执行）
+        cmd = wrap_privileged_cmd(cmd, getattr(self, "cmd_wrapper", ""),
+                                  platform=self.platform)
         if self.lang == "php":
             payload = self._php_exec_payload(cmd)
             fields = {self.pwd: payload}
