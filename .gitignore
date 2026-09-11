@@ -44,3 +44,4 @@ Thumbs.db
 
 # 本地 Agent 记忆 / 工作区数据（非源码，含本地环境信息）
 /.workbuddy/
+/.zcode/

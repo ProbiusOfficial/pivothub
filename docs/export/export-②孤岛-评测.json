@@ -1,0 +1,243 @@
+{
+  "project": {
+    "id": "proj-g7nnw",
+    "name": "②孤岛·封锁边界-评测",
+    "startAt": "20:02",
+    "durationSec": 14400,
+    "note": ""
+  },
+  "generatedAt": "2026-09-10T20:21:46.224Z",
+  "stats": {
+    "hosts": 2,
+    "ownedHosts": 1,
+    "links": 0,
+    "aliveLinks": 0,
+    "shells": 1,
+    "aliveShells": 1,
+    "creds": 0,
+    "flags": 3,
+    "flagsTotal": 6,
+    "segments": 1,
+    "maxLayer": 2
+  },
+  "segments": [
+    {
+      "segment": "10.8.0.0/24",
+      "color": "#3ba7ff",
+      "layer": "VPN",
+      "count": 2
+    }
+  ],
+  "hosts": [
+    {
+      "id": "h-7fwe3",
+      "ip": "10.8.0.14",
+      "hostname": "cyclensTech",
+      "os": "Windows 11 (10.0.26200)",
+      "layer": "LOCAL",
+      "segment": "10.8.0.0/24",
+      "privilege": "admin",
+      "owned": true,
+      "ports": [],
+      "services": [],
+      "note": "攻击端本机（OpenVPN Data Channel Offload · 10.8.0.14）· 面板运行位置",
+      "discovery": "本地",
+      "isLocal": true,
+      "ifaces": [
+        {
+          "iface": "OpenVPN Data Channel Offload",
+          "ip": "10.8.0.14",
+          "segment": "10.8.0.0/24"
+        }
+      ],
+      "posX": null,
+      "posY": null
+    },
+    {
+      "id": "h-a44ow",
+      "ip": "10.8.0.6",
+      "hostname": "",
+      "os": "Linux web-edge 6.1.0-26-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.112-1 (2024-09-30) x86_64 GNU/Linux",
+      "layer": "L1",
+      "segment": "10.8.0.0/24",
+      "privilege": "www-data",
+      "owned": true,
+      "ports": [],
+      "services": [],
+      "note": "添加 Shell 自动登记（请人工补充主机名 / 系统 / 层级）",
+      "discovery": "WebShell 添加",
+      "isLocal": false,
+      "ifaces": [],
+      "posX": null,
+      "posY": null
+    },
+    {
+      "id": "h-l8kms",
+      "ip": "172.29.0.20",
+      "hostname": "oa-portal",
+      "os": "Linux",
+      "layer": "L2",
+      "segment": "172.29.0.0/24",
+      "privilege": "admin",
+      "owned": false,
+      "ports": [],
+      "services": [
+        "80"
+      ],
+      "note": "",
+      "discovery": "手动登记",
+      "isLocal": false,
+      "ifaces": [
+        {
+          "iface": "eth0",
+          "ip": "172.29.0.20",
+          "segment": "172.29.0.0/24"
+        }
+      ],
+      "posX": null,
+      "posY": null
+    }
+  ],
+  "shells": [
+    {
+      "id": "s-b052x",
+      "hostId": "h-a44ow",
+      "type": "PHP 一句话马",
+      "url": "http://10.8.0.6:8083/xp.php",
+      "pass": "cmd",
+      "encoder": "none",
+      "alive": true,
+      "latency": 115,
+      "lastBeat": "16 分钟前",
+      "hostname": "",
+      "privilege": "",
+      "stable": false,
+      "kind": "",
+      "platform": "",
+      "escalatedUser": ""
+    }
+  ],
+  "proxyLinks": [],
+  "credentials": [],
+  "flags": [
+    {
+      "id": "f-y7uvx",
+      "hostId": "h-7fwe3",
+      "stage": "L1 入口",
+      "value": "flag{REDACTED}",
+      "submitted": false,
+      "note": "",
+      "time": "04:03"
+    },
+    {
+      "id": "f-sebkp",
+      "hostId": "h-7fwe3",
+      "stage": "L2 内网",
+      "value": "flag{REDACTED}",
+      "submitted": false,
+      "note": "",
+      "time": "04:03"
+    },
+    {
+      "id": "f-p4213",
+      "hostId": "h-7fwe3",
+      "stage": "L2 内网",
+      "value": "flag{REDACTED}",
+      "submitted": false,
+      "note": "",
+      "time": "04:03"
+    }
+  ],
+  "timeline": [
+    {
+      "id": "t-th8t4",
+      "time": "20:19",
+      "kind": "host",
+      "title": "登记主机 172.29.0.20",
+      "hostId": "h-l8kms",
+      "detail": "",
+      "cmd": "",
+      "markdown": ""
+    },
+    {
+      "id": "t-ytb26",
+      "time": "20:06",
+      "kind": "shell",
+      "title": "在线编辑写入 /var/www/html/public/xp.php",
+      "hostId": "h-a44ow",
+      "detail": "52 字节",
+      "cmd": "",
+      "markdown": ""
+    },
+    {
+      "id": "t-p9vk3",
+      "time": "20:03",
+      "kind": "shell",
+      "title": "登记并连接 Shell：http://10.8.0.6:8083/xp.php",
+      "hostId": "h-a44ow",
+      "detail": "类型 PHP 一句话马 · 编码器 none · 延迟 115ms · whoami=www-data / uname=Linux web-edge 6.1.0-26-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.112-1 (2024-09-30) x86_64 GNU/Linux",
+      "cmd": "",
+      "markdown": ""
+    },
+    {
+      "id": "t-l4pwy",
+      "time": "20:03",
+      "kind": "host",
+      "title": "自动回传基础信息并入库",
+      "hostId": "h-a44ow",
+      "detail": "whoami=www-data / uname=Linux web-edge 6.1.0-26-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.112-1 (2024-09-30) x86_64 GNU/Linux",
+      "cmd": "",
+      "markdown": ""
+    },
+    {
+      "id": "t-owt41",
+      "time": "20:03",
+      "kind": "host",
+      "title": "添加 Shell 自动登记主机 10.8.0.6",
+      "hostId": "h-a44ow",
+      "detail": "添加 Shell 时未选择归属主机：由 URL 地址自动创建，请人工补充信息",
+      "cmd": "",
+      "markdown": ""
+    },
+    {
+      "id": "t-bvbx9",
+      "time": "20:03",
+      "kind": "flag",
+      "title": "拿到 Flag：L2 内网",
+      "hostId": "h-7fwe3",
+      "detail": "flag{REDACTED}",
+      "cmd": "",
+      "markdown": ""
+    },
+    {
+      "id": "t-bpodm",
+      "time": "20:03",
+      "kind": "flag",
+      "title": "拿到 Flag：L2 内网",
+      "hostId": "h-7fwe3",
+      "detail": "flag{REDACTED}",
+      "cmd": "",
+      "markdown": ""
+    },
+    {
+      "id": "t-dh62s",
+      "time": "20:03",
+      "kind": "flag",
+      "title": "拿到 Flag：L1 入口",
+      "hostId": "h-7fwe3",
+      "detail": "flag{REDACTED}",
+      "cmd": "",
+      "markdown": ""
+    },
+    {
+      "id": "t-rv2ig",
+      "time": "20:02",
+      "kind": "host",
+      "title": "新建项目：②孤岛·封锁边界-评测",
+      "hostId": null,
+      "detail": "已创建攻击端本机节点 10.8.0.14（取当前攻击机网络配置）",
+      "cmd": "",
+      "markdown": ""
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8" />
+<title>②孤岛·封锁边界-评测 · PivotHub 报告</title>
+<style>body{background:#070b0f;color:#d7e4ec;font-family:system-ui,"PingFang SC",sans-serif;max-width:900px;margin:0 auto;padding:32px;line-height:1.7}h1,h2{color:#00e5a0}code,pre{font-family:Consolas,monospace;background:#0e161d;color:#a8f0d3;padding:2px 5px;border-radius:3px}pre{padding:12px;overflow:auto;border:1px solid #1d2b37}table{border-collapse:collapse;width:100%}td,th{border:1px solid #1d2b37;padding:6px 9px;text-align:left}blockquote{border-left:3px solid #00e5a0;margin:0;padding-left:12px;color:#8ba0ae}</style></head>
+<body>
+<pre> ②孤岛·封锁边界-评测 · Writeup
+
+&amp;gt; 生成时间：2026/9/11 04:21:47  
+&amp;gt; 工具：PivotHub（链透中枢）· 本报告为初稿，需人工润色
+
+# 0. 概览
+
+| 指标 | 数值 |
+|---|---|
+| 已控主机 | 1 / 2 |
+| 层级深度 | L1 → L2 |
+| 代理链路 | 0 / 0 存活 |
+| 凭据 | 0 条 |
+| Flag | 3 / 6 |
+
+# 1. 网络拓扑
+
+``&lt;code>
+攻击端 127.0.0.1
+&lt;/code>`&lt;code>
+
+![拓扑快照](screenshots/topology.png)
+
+# 2. 跳板链参数
+
+| 工具 | 方向 | 入口 | 出口 | 本地 Socks | 目标网段 |
+|---|---|---|---|---|---|
+
+# 3. 操作时间线
+
+## 20:02 · 资产 — 新建项目：②孤岛·封锁边界-评测
+
+- 已创建攻击端本机节点 10.8.0.14（取当前攻击机网络配置）
+
+## 20:03 · Flag — 拿到 Flag：L1 入口
+
+- 主机：&lt;/code>10.8.0.14&lt;code>
+- flag{REDACTED}
+
+## 20:03 · Flag — 拿到 Flag：L2 内网
+
+- 主机：&lt;/code>10.8.0.14&lt;code>
+- flag{REDACTED}
+
+## 20:03 · Flag — 拿到 Flag：L2 内网
+
+- 主机：&lt;/code>10.8.0.14&lt;code>
+- flag{REDACTED}
+
+## 20:03 · 资产 — 添加 Shell 自动登记主机 10.8.0.6
+
+- 主机：&lt;/code>10.8.0.6&lt;code>
+- 添加 Shell 时未选择归属主机：由 URL 地址自动创建，请人工补充信息
+
+## 20:03 · 资产 — 自动回传基础信息并入库
+
+- 主机：&lt;/code>10.8.0.6&lt;code>
+- whoami=www-data / uname=Linux web-edge 6.1.0-26-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.112-1 (2024-09-30) x86_64 GNU/Linux
+
+## 20:03 · Shell — 登记并连接 Shell：http://10.8.0.6:8083/xp.php
+
+- 主机：&lt;/code>10.8.0.6&lt;code>
+- 类型 PHP 一句话马 · 编码器 none · 延迟 115ms · whoami=www-data / uname=Linux web-edge 6.1.0-26-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.112-1 (2024-09-30) x86_64 GNU/Linux
+
+## 20:06 · Shell — 在线编辑写入 /var/www/html/public/xp.php
+
+- 主机：&lt;/code>10.8.0.6&lt;code>
+- 52 字节
+
+## 20:19 · 资产 — 登记主机 172.29.0.20
+
+- 主机：&lt;/code>172.29.0.20&lt;code>
+
+# 4. 凭据清单（明文）
+
+| 账号 | 类型 | 凭据 | 来源主机 | 适用服务 |
+|---|---|---|---|---|
+
+# 5. Flag 收集
+
+| 主机 | 阶段 | Flag | 状态 |
+|---|---|---|---|
+| 10.8.0.14 | L1 入口 | &lt;/code>flag{REDACTED}&lt;code> | 待提交 |
+| 10.8.0.14 | L2 内网 | &lt;/code>flag{REDACTED}&lt;code> | 待提交 |
+| 10.8.0.14 | L2 内网 | &lt;/code>flag{REDACTED}` | 待提交 |
+
+# 6. 总结与反思
+
+&amp;gt; 待补充：本层关键突破点、踩坑与改进思路。
+</pre>
+</body></html>

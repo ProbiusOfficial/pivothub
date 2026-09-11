@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mockup · Shell 管理重设计 — PivotHub</title>
+<style>
+/* ============================================================
+   Shell 管理重设计 · 独立静态 Mockup
+   主题变量与 assets/css/theme.css 保持一致 · 纯假数据 · 不接后端
+   顶部可切换 4 个演示状态：未选中 / 伪终端 / raw 交互 / ⋮ 菜单展开
+   ============================================================ */
+:root {
+  --bg: #070b0f; --bg-1: #0a1015; --bg-2: #0e161d; --bg-3: #131d26; --bg-hover: #17232e;
+  --border: #1d2b37; --border-strong: #263a49; --border-glow: rgba(0, 229, 160, 0.35);
+  --text: #d7e4ec; --text-dim: #8ba0ae; --text-mute: #5f7484;
+  --accent: #00e5a0; --accent-dim: #00b37d; --accent-soft: rgba(0, 229, 160, 0.12);
+  --accent-2: #ff8a3d; --accent-2-soft: rgba(255, 138, 61, 0.12);
+  --info: #3ba7ff; --info-soft: rgba(59, 167, 255, 0.12);
+  --ok: #00e5a0; --warn: #ffc247; --warn-soft: rgba(255, 194, 71, 0.12);
+  --err: #ff4d5e; --err-soft: rgba(255, 77, 94, 0.12); --purple: #a97bff;
+  --r-sm: 4px; --r: 6px; --r-lg: 10px;
+  --mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
+  --sans: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font-family: var(--sans); font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+body { overflow: hidden;
+  background-image:
+    radial-gradient(900px 420px at 12% -8%, rgba(0, 229, 160, 0.07), transparent 60%),
+    linear-gradient(rgba(29, 43, 55, 0.35) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(29, 43, 55, 0.35) 1px, transparent 1px);
+  background-size: auto, 44px 44px, 44px 44px; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1f2f3b; border-radius: 6px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #2b4152; background-clip: content-box; }
+
+.mono { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--text-dim); }
+.tiny { font-size: 11.5px; }
+.grow { flex: 1; min-width: 0; }
+
+/* ---------- 通用元件（与生产 components.css 同款） ---------- */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 6px 12px; border: 1px solid var(--border-strong); border-radius: var(--r);
+  background: var(--bg-3); color: var(--text); font-family: inherit; font-size: 12px;
+  cursor: pointer; white-space: nowrap;
+  transition: background .12s, border-color .12s, color .12s, box-shadow .12s; }
+.btn:hover { background: var(--bg-hover); border-color: #33556b; }
+.btn:active { transform: translateY(1px); }
+.btn-primary { background: linear-gradient(180deg, rgba(0,229,160,.22), rgba(0,179,125,.16));
+  border-color: rgba(0,229,160,.5); color: var(--accent); }
+.btn-primary:hover { background: rgba(0,229,160,.26); border-color: var(--accent); box-shadow: 0 0 14px rgba(0,229,160,.18); }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+.btn-ghost:hover { background: var(--bg-hover); color: var(--text); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-xs { padding: 2px 7px; font-size: 11px; border-radius: var(--r-sm); }
+.btn-block { width: 100%; }
+
+.badge { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--bg-3); color: var(--text-dim);
+  font-size: 10.5px; letter-spacing: .3px; white-space: nowrap; }
+.badge-ok { color: var(--ok); border-color: rgba(0,229,160,.4); background: var(--accent-soft); }
+.badge-warn { color: var(--warn); border-color: rgba(255,194,71,.4); background: var(--warn-soft); }
+.badge-err { color: var(--err); border-color: rgba(255,77,94,.4); background: var(--err-soft); }
+.badge-info { color: var(--info); border-color: rgba(59,167,255,.35); background: var(--info-soft); }
+.badge-idle { color: var(--text-mute); }
+
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--text-mute);
+  flex: 0 0 auto; margin-right: 7px; }
+.dot.is-on { background: var(--ok); box-shadow: 0 0 8px rgba(0,229,160,.7); animation: pulse 2.4s infinite; }
+.dot.is-off { background: #3d4d59; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+
+.seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: var(--r); }
+.seg-btn { padding: 4px 10px; border: none; border-radius: var(--r-sm); background: transparent;
+  color: var(--text-dim); font-family: inherit; font-size: 11.5px; cursor: pointer; }
+.seg-btn:hover { color: var(--text); background: var(--bg-hover); }
+.seg-btn.is-active { background: var(--accent-soft); color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(0,229,160,.3); }
+
+.ico { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round; flex: 0 0 auto; }
+.caret { width: 10px; height: 10px; }
+
+/* ---------- Mockup 控制条（非设计方案本体） ---------- */
+.mock-bar { height: 46px; display: flex; align-items: center; gap: 14px; padding: 0 16px;
+  background: linear-gradient(180deg, #101820, #0b1117); border-bottom: 1px solid var(--border-strong); }
+.mock-tag { font-family: var(--mono); font-size: 11px; letter-spacing: 1px; color: var(--accent);
+  border: 1px dashed rgba(0,229,160,.45); border-radius: var(--r-sm); padding: 2px 8px; }
+.mock-note { font-size: 11.5px; color: var(--text-dim); }
+.mock-note b { color: var(--text); }
+.mock-bar .spacer { flex: 1; }
+.mock-check { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px;
+  color: var(--text-dim); cursor: pointer; user-select: none; }
+.mock-check input { accent-color: var(--accent); }
+
+/* ---------- 页面骨架 ---------- */
+.app { height: calc(100vh - 46px); display: flex; flex-direction: column; }
+.view-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px;
+  padding: 12px 16px 10px; }
+.view-head h2 { margin: 0; font-size: 16px; letter-spacing: .2px; }
+.view-head p { margin: 1px 0 0; }
+.view-head-actions { display: flex; align-items: center; gap: 8px; position: relative; }
+
+.workbench { flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--border); }
+
+/* ---------- 左侧：会话列表 ---------- */
+.sess-pane { width: 268px; flex: 0 0 268px; display: flex; flex-direction: column;
+  background: var(--bg-1); border-right: 1px solid var(--border); min-height: 0; }
+.pane-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
+.pane-toolbar .seg { flex: 1; }
+.pane-toolbar .seg-btn { flex: 1; padding: 4px 4px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+  padding: 0; border: 1px solid var(--border); border-radius: var(--r); background: var(--bg-2);
+  color: var(--text-dim); cursor: pointer; }
+.icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+.sess-list { flex: 1; overflow-y: auto; padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 6px; }
+.sess-card { position: relative; display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: var(--bg-2); cursor: pointer; transition: border-color .12s, background .12s; }
+.sess-card:hover { background: var(--bg-hover); }
+.sess-card.is-selected { border-color: rgba(0,229,160,.5);
+  box-shadow: 0 0 0 1px var(--border-glow) inset, 0 0 16px rgba(0,229,160,.06); }
+.sess-card .dot { margin-top: 6px; }
+.sess-main { flex: 1; min-width: 0; }
+.sess-ip { display: flex; align-items: baseline; gap: 6px; }
+.sess-ip b { font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: .2px; }
+.sess-meta { margin-top: 3px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sess-meta .lat { font-family: var(--mono); font-size: 11px; color: var(--text-mute); }
+.lat.ok { color: var(--ok); }
+/* hover 才出现的行内图标操作：代替常驻按钮列 */
+.sess-acts { position: absolute; top: 6px; right: 6px; display: none; gap: 2px;
+  padding: 2px; background: var(--bg-3); border: 1px solid var(--border-strong); border-radius: var(--r); }
+.sess-card:hover .sess-acts { display: inline-flex; }
+.sess-acts button { display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 20px; padding: 0; border: none; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-dim); cursor: pointer; }
+.sess-acts button:hover { background: var(--bg-hover); color: var(--text); }
+.sess-acts button.danger:hover { color: var(--err); }
+.pane-foot { padding: 8px 12px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--text-mute); }
+
+/* ---------- 右侧：工作台 ---------- */
+.ws { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ws-empty { flex: 1; display: none; align-items: center; justify-content: center; }
+.empty-guide { width: 440px; text-align: center; padding: 30px 34px;
+  border: 1px dashed var(--border-strong); border-radius: var(--r-lg); background: rgba(14,22,29,.5); }
+.empty-guide .glyph { font-family: var(--mono); font-size: 26px; color: var(--accent);
+  text-shadow: 0 0 24px rgba(0,229,160,.45); letter-spacing: 3px; }
+.empty-guide h3 { margin: 10px 0 4px; font-size: 14px; }
+.empty-guide p { margin: 0; color: var(--text-dim); font-size: 12px; }
+.empty-guide .hints { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.hint-row { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--text-dim); }
+.hint-row .n { font-family: var(--mono); color: var(--accent); font-size: 11px; }
+
+/* 会话头：状态徽标 + 当前步主操作 + ⋮ */
+.ws-session { display: none; flex: 1; min-height: 0; flex-direction: column; }
+.sess-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  background: var(--bg-2); border-bottom: 1px solid var(--border); position: relative; z-index: 30; }
+.sess-head .title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sess-head .title .ip { font-family: var(--mono); font-size: 13.5px; font-weight: 600; }
+.sess-head .title .type { font-size: 11.5px; color: var(--text-mute); }
+.sess-head-acts { display: flex; align-items: center; gap: 6px; position: relative; }
+
+/* ⋮ 溢出菜单：低频动作按性质分组 */
+.menu { position: absolute; top: calc(100% + 6px); right: 0; width: 224px; z-index: 50;
+  background: var(--bg-2); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
+  box-shadow: 0 14px 34px rgba(0,0,0,.55); padding: 5px; display: none; }
+.menu.open { display: block; }
+.menu-group { padding: 3px 0; }
+.menu-group + .menu-group { border-top: 1px solid var(--border); }
+.menu-label { padding: 4px 9px 2px; font-size: 10px; letter-spacing: .8px; color: var(--text-mute); text-transform: uppercase; }
+.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 9px;
+  border: none; border-radius: var(--r); background: transparent; color: var(--text);
+  font-family: inherit; font-size: 12px; cursor: pointer; text-align: left; }
+.menu-item:hover { background: var(--bg-hover); }
+.menu-item .ico { color: var(--text-dim); }
+.menu-item .tail { margin-left: auto; font-size: 10.5px; color: var(--text-mute); font-family: var(--mono); }
+.menu-item.danger, .menu-item.danger .ico { color: var(--err); }
+.menu-item.danger:hover { background: var(--err-soft); }
+
+/* 工作台主体：终端（主角） + 行动面板 */
+.ws-body { flex: 1; min-height: 0; display: flex; }
+.term-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.term { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px;
+  background: #05080b; font-family: var(--mono); font-size: 12px; line-height: 1.6; cursor: text; }
+.term-line { white-space: pre-wrap; word-break: break-word; }
+.term-in { color: var(--text); } .term-out { color: #b6cbd8; }
+.term-err { color: var(--err); } .term-warn { color: var(--warn); }
+.term-ok { color: var(--accent); } .term-dim { color: var(--text-mute); }
+.term-ps1 { color: var(--accent); }
+.term-input-row { position: relative; display: flex; align-items: center; gap: 6px; padding: 7px 12px;
+  background: #05080b; border-top: 1px solid var(--border); }
+.term-input { flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+  color: var(--text); font-family: var(--mono); font-size: 12px; caret-color: var(--accent); }
+.term-input::placeholder { color: #35485a; }
+/* 键盘控制键组：只在 raw 交互模式出现在输入行右侧 */
+.raw-keys { display: none; align-items: center; gap: 3px; }
+.raw-keys .rk { padding: 2px 7px; font-size: 10.5px; font-family: var(--mono); }
+.raw-keys .sep { width: 1px; height: 14px; background: var(--border-strong); margin: 0 3px; }
+
+/* ---------- 右侧行动面板 ---------- */
+.side { width: 284px; flex: 0 0 284px; overflow-y: auto; background: var(--bg-1);
+  border-left: 1px solid var(--border); padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+.panel-card { position: relative; border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: var(--bg-2); padding: 10px 11px; }
+.panel-card h4 { margin: 0 0 8px; font-size: 11px; letter-spacing: .8px; color: var(--text-mute);
+  text-transform: uppercase; display: flex; align-items: center; gap: 6px; }
+.panel-card h4 .badge { margin-left: auto; text-transform: none; letter-spacing: .3px; }
+
+/* 流程卡：①检测 → ②固化 → ③提权 */
+.flow { display: flex; flex-direction: column; }
+.step { position: relative; display: flex; gap: 9px; padding: 5px 0 13px; }
+.step::before { content: ""; position: absolute; left: 10px; top: 24px; bottom: -1px;
+  width: 1px; background: var(--border-strong); }
+.step:last-child { padding-bottom: 2px; }
+.step:last-child::before { display: none; }
+.step .n { width: 21px; height: 21px; border-radius: 50%; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 11px;
+  border: 1px solid var(--border-strong); background: var(--bg-3); color: var(--text-mute); }
+.step .s-main { flex: 1; min-width: 0; }
+.step .s-name { font-size: 12.5px; color: var(--text-mute); }
+.step .s-sub { font-size: 11px; color: var(--text-mute); margin-top: 1px; }
+.step.is-current .n { border-color: rgba(0,229,160,.6); color: var(--accent); background: var(--accent-soft);
+  box-shadow: 0 0 10px rgba(0,229,160,.25); }
+.step.is-current .s-name { color: var(--text); font-weight: 600; }
+.step.is-done .n { border-color: rgba(0,229,160,.4); color: var(--accent); background: transparent; }
+.step.is-done::before { background: rgba(0,229,160,.35); }
+.step.is-done .s-name { color: var(--text-dim); }
+.step.is-idle .s-name { color: var(--text-mute); }
+
+/* 能力指示灯 */
+.caps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.cap { display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 4px 2px; border-radius: var(--r); border: 1px solid var(--border);
+  font-family: var(--mono); font-size: 11px; color: var(--text-mute); background: var(--bg); }
+.cap.is-ok { color: var(--ok); border-color: rgba(0,229,160,.35); background: var(--accent-soft); }
+.cap.is-no { color: var(--err); border-color: rgba(255,77,94,.28); background: rgba(255,77,94,.06); }
+
+/* 会话信息 */
+.kv { display: flex; flex-direction: column; gap: 5px; }
+.kv .row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.kv .k { color: var(--text-mute); flex: 0 0 auto; }
+.kv .v { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- 状态机（顶部切换控制） ---------- */
+.ws-session { display: none; }
+body[data-state="empty"] .ws-empty { display: flex; }
+body:not([data-state="empty"]) .ws-session { display: flex; }
+
+/* 选中卡片 */
+body[data-state="pseudo"] .card-jsp, body[data-state="menu"] .card-jsp,
+body[data-state="raw"] .card-rev1 { border-color: rgba(0,229,160,.5);
+  box-shadow: 0 0 0 1px var(--border-glow) inset, 0 0 16px rgba(0,229,160,.06); }
+
+/* 按状态显隐的元素：默认隐藏，body 命中状态时按元素类型恢复显示 */
+.only-pseudo, .only-raw { display: none; }
+body[data-state="pseudo"] .only-pseudo, body[data-state="menu"] .only-pseudo { display: inline-flex; }
+body[data-state="raw"] .only-raw { display: inline-flex; }
+body[data-state="pseudo"] .term.only-pseudo, body[data-state="menu"] .term.only-pseudo { display: block; }
+body[data-state="raw"] .term.only-raw { display: block; }
+body[data-state="pseudo"] span.term-ps1.only-pseudo, body[data-state="menu"] span.term-ps1.only-pseudo { display: inline; }
+body[data-state="raw"] span.term-ps1.only-raw { display: inline; }
+
+/* raw 键组只在 raw 出现 */
+body[data-state="raw"] .raw-keys { display: inline-flex; }
+/* ⋮ 菜单在 ④ 状态展开 */
+body[data-state="menu"] .menu { display: block; }
+
+/* ---------- 设计注解（可开关） ---------- */
+.pin { display: none; position: absolute; z-index: 60; padding: 3px 8px;
+  border: 1px dashed rgba(255,194,71,.55); border-radius: 999px;
+  background: rgba(20,16,4,.92); color: var(--warn); font-size: 10.5px; letter-spacing: .2px;
+  pointer-events: none; white-space: nowrap; }
+body.notes-on .pin { display: block; }
+.pin-head { top: -16px; right: 0; }
+.pin-input { bottom: calc(100% + 8px); right: 8px; }
+.pin-flow { top: -10px; right: 10px; }
+</style>
+</head>
+<body data-state="pseudo" class="notes-on">
+
+<!-- ═══ Mockup 控制条：切换演示状态（非设计本体） ═══ -->
+<div class="mock-bar">
+  <span class="mock-tag">MOCKUP</span>
+  <div class="seg" id="stateSeg">
+    <button class="seg-btn" data-go="empty">① 未选中</button>
+    <button class="seg-btn is-active" data-go="pseudo">② 伪终端会话</button>
+    <button class="seg-btn" data-go="raw">③ raw 交互会话</button>
+    <button class="seg-btn" data-go="menu">④ ⋮ 菜单展开</button>
+  </div>
+  <span class="mock-note" id="mockNote">伪终端会话：头部只留 <b>下一步主操作（终端固化）</b> + 提权 + ⋮ 菜单</span>
+  <span class="spacer"></span>
+  <label class="mock-check"><input type="checkbox" id="notesToggle" checked /> 显示设计注解</label>
+</div>
+
+<div class="app">
+  <!-- ═══ 页头：3 按钮 → 2 按钮（「提升为 SSH 会话」下放到会话 ⋮ 菜单） ═══ -->
+  <div class="view-head">
+    <div>
+      <h2>Shell 管理</h2>
+      <p class="muted tiny">会话工作台 · 终端为主角 · 低频动作收进 ⋮ 菜单（重设计稿）</p>
+    </div>
+    <div class="view-head-actions">
+      <button class="btn btn-sm">
+        <svg class="ico" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        批量
+        <svg class="ico caret" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <button class="btn btn-sm btn-primary">
+        <svg class="ico" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        添加 Shell
+      </button>
+    </div>
+  </div>
+
+  <div class="workbench">
+    <!-- ═══ 左：会话列表（紧凑卡片，代替 9 列宽表） ═══ -->
+    <aside class="sess-pane">
+      <div class="pane-toolbar">
+        <div class="seg">
+          <button class="seg-btn is-active">全部 5</button>
+          <button class="seg-btn">存活 2</button>
+          <button class="seg-btn">断线 3</button>
+        </div>
+        <button class="icon-btn" title="搜索">
+          <svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </button>
+      </div>
+
+      <div class="sess-list">
+        <div class="sess-card card-jsp">
+          <span class="dot is-on"></span>
+          <div class="sess-main">
+            <div class="sess-ip"><b>10.8.0.6</b><span class="badge badge-info">JSP 一句话</span></div>
+            <div class="sess-meta">
+              <span class="badge badge-warn">伪终端</span>
+              <span class="lat">8085/pivot_shell.jsp</span>
+            </div>
+          </div>
+          <div class="sess-acts">
+            <button title="连通性测试"><svg class="ico" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></button>
+            <button title="打开终端"><svg class="ico" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></button>
+            <button class="danger" title="删除"><svg class="ico" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          </div>
+        </div>
+
+        <div class="sess-card card-rev1">
+          <span class="dot is-on"></span>
+          <div class="sess-main">
+            <div class="sess-ip"><b>10.8.0.6</b><span class="badge badge-info">反弹 · bash</span></div>
+            <div class="sess-meta">
+              <span class="badge badge-ok">已固化 TTY</span>
+              <span class="lat ok">36566 · 42ms</span>
+            </div>
+          </div>
+          <div class="sess-acts">
+            <button title="连通性测试"><svg class="ico" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></button>
+            <button title="打开终端"><svg class="ico" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></button>
+            <button class="danger" title="删除"><svg class="ico" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          </div>
+        </div>
+
+        <div class="sess-card">
+          <span class="dot is-off"></span>
+          <div class="sess-main">
+            <div class="sess-ip"><b>10.8.0.6</b><span class="badge badge-info">反弹 · base64</span></div>
+            <div class="sess-meta">
+              <span class="badge badge-idle">伪终端</span>
+              <span class="lat">34418 · 1 小时前断线</span>
+            </div>
+          </div>
+          <div class="sess-acts">
+            <button title="连通性测试"><svg class="ico" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></button>
+            <button title="打开终端"><svg class="ico" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></button>
+            <button class="danger" title="删除"><svg class="ico" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          </div>
+        </div>
+
+        <div class="sess-card">
+          <span class="dot is-off"></span>
+          <div class="sess-main">
+            <div class="sess-ip"><b>10.8.0.6</b><span class="badge badge-info">反弹 · hex</span></div>
+            <div class="sess-meta">
+              <span class="badge badge-idle">伪终端</span>
+              <span class="lat">60566 · 1 小时前断线</span>
+            </div>
+          </div>
+          <div class="sess-acts">
+            <button title="连通性测试"><svg class="ico" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></button>
+            <button title="打开终端"><svg class="ico" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></button>
+            <button class="danger" title="删除"><svg class="ico" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          </div>
+        </div>
+
+        <div class="sess-card">
+          <span class="dot is-off"></span>
+          <div class="sess-main">
+            <div class="sess-ip"><b>10.8.0.6</b><span class="badge badge-info">反弹 · base64</span></div>
+            <div class="sess-meta">
+              <span class="badge badge-idle">伪终端</span>
+              <span class="lat">55494 · 1 小时前断线</span>
+            </div>
+          </div>
+          <div class="sess-acts">
+            <button title="连通性测试"><svg class="ico" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></button>
+            <button title="打开终端"><svg class="ico" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></button>
+            <button class="danger" title="删除"><svg class="ico" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="pane-foot">
+        <span>5 个会话 · 2 存活</span>
+        <span>另有 2 个 SSH 会话 →</span>
+      </div>
+    </aside>
+
+    <!-- ═══ 右：工作台 ═══ -->
+    <section class="ws">
+      <!-- 未选中：引导（不占任何按钮位） -->
+      <div class="ws-empty">
+        <div class="empty-guide">
+          <div class="glyph">&gt;_</div>
+          <h3>从左侧选择一个会话</h3>
+          <p>终端、固化、提权都会在工作台里围绕选中的会话展开</p>
+          <div class="hints">
+            <div class="hint-row"><span class="n">01</span><span>没有入口？点右上角「添加 Shell」登记一句话马</span></div>
+            <div class="hint-row"><span class="n">02</span><span>需要监听？去左侧「反弹 Shell」页生成并等待回连</span></div>
+            <div class="hint-row"><span class="n">03</span><span>拿到 SSH 凭据？在「SSH 会话」页直接纳管</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 选中会话：会话头 + 终端 + 行动面板 -->
+      <div class="ws-session">
+
+        <!-- 会话头：形态/提权徽标 + 当前步主操作 + ⋮ -->
+        <div class="sess-head">
+          <div class="title">
+            <span class="dot is-on js-dot"></span>
+            <span class="ip js-ip">10.8.0.6</span>
+            <span class="type js-type">JSP 一句话马</span>
+          </div>
+          <span class="badge badge-warn only-pseudo">伪终端</span>
+          <span class="badge badge-ok only-raw">已固化 TTY</span>
+          <span class="grow"></span>
+
+          <div class="sess-head-acts">
+            <span class="pin pin-head">注：头部只留当前步主操作，其余全部收进 ⋮</span>
+            <!-- 伪终端态：固化是下一步 → 主按钮（形态徽标并入按钮文案） -->
+            <button class="btn btn-xs btn-primary only-pseudo">
+              <svg class="ico" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              终端固化 · 待固化
+            </button>
+            <button class="btn btn-xs only-pseudo">
+              <svg class="ico" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              一键提权
+            </button>
+            <!-- raw 态：固化已完成变成徽标，头部主操作自动切为提权 -->
+            <button class="btn btn-xs btn-primary only-raw">
+              <svg class="ico" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              ⚡ 一键提权
+            </button>
+            <!-- ⋮ 溢出菜单 -->
+            <button class="btn btn-xs" title="更多操作" style="padding:2px 6px;">
+              <svg class="ico" viewBox="0 0 24 24" style="width:14px;height:14px;"><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/></svg>
+            </button>
+
+            <!-- ⋮ 菜单（④ 状态展开） -->
+            <div class="menu">
+              <div class="menu-group">
+                <div class="menu-label">会话动作</div>
+                <button class="menu-item">
+                  <svg class="ico" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                  反弹 Shell<span class="tail">开监听</span>
+                </button>
+                <button class="menu-item">
+                  <svg class="ico" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                  提升为 SSH 会话<span class="tail">带凭据</span>
+                </button>
+              </div>
+              <div class="menu-group">
+                <div class="menu-label">终端控制</div>
+                <button class="menu-item">
+                  <svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 9l3 3-3 3M13 15h4"/></svg>
+                  清屏<span class="tail">Ctrl+L</span>
+                </button>
+                <button class="menu-item">
+                  <svg class="ico" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+                  关闭终端<span class="tail">释放通道</span>
+                </button>
+              </div>
+              <div class="menu-group">
+                <div class="menu-label">危险区</div>
+                <button class="menu-item danger">
+                  <svg class="ico" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  删除会话<span class="tail">不可恢复</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 终端 + 行动面板 -->
+        <div class="ws-body">
+          <div class="term-col">
+            <!-- 伪终端回显（② ④ 状态） -->
+            <div class="term term-pseudo only-pseudo">
+              <div class="term-line term-dim">PivotHub · 虚拟终端 v1.0 — 会话 s-zga4g · JSP 一句话马</div>
+              <div class="term-line term-dim">目标 10.8.0.6 · 编码器 none · 输入 help 查看可用命令</div>
+              <div class="term-line term-warn">⚠ 当前为 WebShell 伪终端：无 TTY、无 job control，su / ssh / vim / top 等交互程序无法正常使用</div>
+              <div class="term-line term-dim">→ 按右侧「下一步」引导：先做交互能力检测，再固化升级为稳定交互终端</div>
+              <div class="term-line"><span class="term-ps1">$ </span><span class="term-in">id</span></div>
+              <div class="term-line term-out">uid=33(www-data) gid=33(www-data) groups=33(www-data)</div>
+              <div class="term-line"><span class="term-ps1">$ </span><span class="term-in">uname -a</span></div>
+              <div class="term-line term-out">Linux web01 5.15.0-91-ubuntu #86-Ubuntu SMP x86_64 GNU/Linux</div>
+              <div class="term-line"><span class="term-ps1">$ </span></div>
+            </div>
+            <!-- raw 交互回显（③ 状态） -->
+            <div class="term term-raw-d only-raw">
+              <div class="term-line term-dim">── 原始交互 · 直连目标 PTY · 真实提示符 ──────────────</div>
+              <div class="term-line"><span class="term-ps1">www@web01</span><span class="term-in">:/var/www/html$ </span><span class="term-in">id</span></div>
+              <div class="term-line term-out">uid=33(www-data) gid=33(www-data) groups=33(www-data)</div>
+              <div class="term-line"><span class="term-ps1">www@web01</span><span class="term-in">:/var/www/html$ </span><span class="term-in">sudo -l</span></div>
+              <div class="term-line term-out">User www-data may run the following commands on web01:</div>
+              <div class="term-line term-ok">(root) NOPASSWD: /usr/bin/vi</div>
+              <div class="term-line"><span class="term-ps1">www@web01</span><span class="term-in">:/var/www/html$ </span></div>
+              <div class="term-line term-dim">提示：Ctrl+C / Tab / Ctrl+D 在下方输入行右侧；↑↓ 翻历史</div>
+            </div>
+
+            <!-- 输入行：键盘控制键只在 raw 模式贴在这里 -->
+            <div class="term-input-row">
+              <span class="pin pin-input">注：Ctrl+C / Tab / Ctrl+D 键盘键归位输入行，仅 raw 模式出现</span>
+              <span class="term-ps1 only-pseudo">$&nbsp;</span>
+              <span class="term-ps1 only-raw">www@web01:~$&nbsp;</span>
+              <input class="term-input" placeholder="输入命令，回车发送…（演示稿，不实际发送）" />
+              <div class="raw-keys">
+                <button class="btn btn-xs btn-ghost rk" title="中断当前命令">^C</button>
+                <button class="btn btn-xs btn-ghost rk" title="补全">Tab</button>
+                <button class="btn btn-xs btn-ghost rk" title="发送 EOF">^D</button>
+                <span class="sep"></span>
+                <span class="badge badge-ok" title="通道内已有 PTY">PTY ✓</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 行动面板：把「一堆按钮」变成「下一步该做什么」 -->
+          <aside class="side">
+            <div class="panel-card">
+              <span class="pin pin-flow">注：底部 hint 条升级为「下一步」引导面板</span>
+              <h4>下一步
+                <span class="badge badge-warn only-pseudo">可固化</span>
+                <span class="badge badge-ok only-raw">可提权</span>
+              </h4>
+              <div class="flow">
+                <div class="step st1">
+                  <span class="n">1</span>
+                  <div class="s-main">
+                    <div class="s-name">交互能力检测</div>
+                    <div class="s-sub st1-sub">探测 TTY / TERM / python / script / socat / nc</div>
+                    <div class="s-act" style="display:none"></div>
+                  </div>
+                </div>
+                <div class="step st2">
+                  <span class="n">2</span>
+                  <div class="s-main">
+                    <div class="s-name">终端固化</div>
+                    <div class="s-sub st2-sub">选技法套 PTY 并 stty raw 收尾 → 稳定交互终端</div>
+                    <div class="s-act" style="display:none"></div>
+                  </div>
+                </div>
+                <div class="step st3">
+                  <span class="n">3</span>
+                  <div class="s-main">
+                    <div class="s-name">一键提权</div>
+                    <div class="s-sub st3-sub">采集事实 → 匹配路径 → 执行 → 验证 root</div>
+                    <div class="s-act" style="display:none"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel-card">
+              <h4>交互能力
+                <span class="badge badge-idle only-pseudo">未检测</span>
+                <span class="badge badge-ok only-raw">已检测</span>
+              </h4>
+              <div class="caps">
+                <span class="cap">TTY</span>
+                <span class="cap">TERM</span>
+                <span class="cap">python</span>
+                <span class="cap">script</span>
+                <span class="cap">socat</span>
+                <span class="cap">nc</span>
+              </div>
+              <p class="tiny muted" style="margin:8px 0 0">
+                <span class="only-pseudo">尚未检测：执行「开始检测」后这里会点亮每项能力。</span>
+                <span class="only-raw">TERM xterm-256color · PTY 已就绪，交互程序可正常使用。</span>
+              </p>
+            </div>
+
+            <div class="panel-card">
+              <h4>会话信息</h4>
+              <div class="kv">
+                <div class="row"><span class="k">当前身份</span><span class="v js-user">www-data@web01</span></div>
+                <div class="row"><span class="k">类型 / 编码器</span><span class="v js-enc">JSP 一句话 / none</span></div>
+                <div class="row"><span class="k">端点</span><span class="v js-endpoint">8085/pivot_shell.jsp</span></div>
+                <div class="row"><span class="k">归属主机</span><span class="v">10.8.0.6（DMZ 层）</span></div>
+                <div class="row"><span class="k">延迟 / 心跳</span><span class="v js-beat">35ms · 刚刚</span></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+/* 状态切换 + 注解开关（仅 mockup 演示用） */
+(function () {
+  var NOTES = {
+    empty: '未选中：工作台显示引导，不占任何按钮位',
+    pseudo: '伪终端会话：头部只留 <b>下一步主操作（终端固化）</b> + 提权 + ⋮ 菜单',
+    raw: 'raw 交互会话：固化已完成变成徽标，头部主操作自动切换为<b>「一键提权」</b>',
+    menu: '⋮ 菜单展开：反弹 Shell / 提升 SSH / 清屏 / 关闭 / 删除，按性质分三组收纳',
+  };
+  var RAW_CAPS = { 'TTY': 1, 'TERM': 1, 'python': 1, 'script': 1, 'socat': 0, 'nc': 1 };
+
+  var seg = document.getElementById('stateSeg');
+  var note = document.getElementById('mockNote');
+  seg.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-go]');
+    if (!btn) return;
+    var st = btn.getAttribute('data-go');
+    document.body.setAttribute('data-state', st);
+    seg.querySelectorAll('.seg-btn').forEach(function (b) { b.classList.toggle('is-active', b === btn); });
+    note.innerHTML = NOTES[st];
+    sync(st);
+  });
+  document.getElementById('notesToggle').addEventListener('change', function (e) {
+    document.body.classList.toggle('notes-on', e.target.checked);
+  });
+
+  /* 流程步骤 / 能力灯 / 会话信息按状态联动 */
+  function sync(st) {
+    var raw = st === 'raw';
+    var pseudo = st === 'pseudo' || st === 'menu';
+    setStep('.st1', pseudo ? 'current' : raw ? 'done' : 'idle',
+      raw ? '已完成 · TTY xterm-256color' : '探测 TTY / TERM / python / script / socat / nc',
+      pseudo ? '开始检测' : null);
+    setStep('.st2', raw ? 'done' : 'idle',
+      raw ? '已完成 · script -qc /bin/bash' : '选技法套 PTY 并 stty raw 收尾 → 稳定交互终端', null);
+    setStep('.st3', raw ? 'current' : 'idle',
+      '采集事实 → 匹配路径 → 执行 → 验证 root', raw ? '⚡ 采集并提权' : null);
+
+    /* 能力灯：未检测=中性，已检测=逐项点亮 */
+    document.querySelectorAll('.caps .cap').forEach(function (el) {
+      var name = el.getAttribute('data-name') || el.textContent.trim();
+      el.setAttribute('data-name', name);
+      el.classList.toggle('is-ok', raw && !!RAW_CAPS[name]);
+      el.classList.toggle('is-no', raw && !RAW_CAPS[name]);
+      el.textContent = raw ? name + (RAW_CAPS[name] ? ' ✓' : ' ✗') : name;
+    });
+
+    /* 会话信息联动 */
+    document.querySelector('.js-type').textContent = raw ? '反弹 Shell · bash /dev/tcp' : 'JSP 一句话马';
+    document.querySelector('.js-enc').textContent = raw ? 'bash /dev/tcp / base64' : 'JSP 一句话 / none';
+    document.querySelector('.js-endpoint').textContent = raw ? 'reverse://10.8.0.6:36566' : '8085/pivot_shell.jsp';
+    document.querySelector('.js-beat').textContent = raw ? '42ms · 刚刚' : '35ms · 刚刚';
+  }
+
+  function setStep(sel, state, sub, actLabel) {
+    var el = document.querySelector(sel);
+    if (!el) return;
+    el.classList.toggle('is-current', state === 'current');
+    el.classList.toggle('is-done', state === 'done');
+    el.classList.toggle('is-idle', state === 'idle');
+    var n = el.querySelector('.n');
+    n.textContent = state === 'done' ? '✓' : sel.replace('.st', '');
+    var subEl = el.querySelector('.s-sub');
+    if (subEl && sub) subEl.textContent = sub;
+    var act = el.querySelector('.s-act');
+    if (act) {
+      if (actLabel) {
+        act.style.display = 'block';
+        act.innerHTML = '<button class="btn btn-xs btn-primary btn-block">' + actLabel + '</button>';
+      } else {
+        act.style.display = 'none';
+        act.innerHTML = '';
+      }
+    }
+  }
+
+  sync('pseudo');
+})();
+</script>
+</body>
+</html>
