@@ -119,10 +119,12 @@
     }, 3200);
   }
 
-  /* 后端不可用时的统一失败反馈 */
-  function failApi(what) {
-    toast(what + '失败：后端不可用或接口报错', 'err');
-    termPush('err', escapeHtml(what + '失败：后端不可用'));
+  /* 后端不可用时的统一失败反馈：why 可传 Error 或字符串（后端 detail / 降级原因），
+     原样带出，不再一律糊成「后端不可用或接口报错」。 */
+  function failApi(what, why) {
+    const detail = why ? String((why && why.message) || why) : '后端不可用或接口报错';
+    toast(what + '失败：' + detail, 'err');
+    termPush('err', escapeHtml(what + '失败：' + detail));
   }
 
   function copy(text) {
@@ -200,22 +202,14 @@
     }
   }
 
-  /* ---------- 定时器 / 心跳 ---------- */
+  /* ---------- 定时器 ---------- */
   let tickTimer = null;
   function startTicker() {
     if (tickTimer) clearInterval(tickTimer);
     tickTimer = setInterval(() => {
       if (state.timer.running) state.timer.elapsedSec += 1;
-      /* 存活链路延迟抖动 */
-      state.links.forEach((l) => {
-        if (l.status !== 'alive') return;
-        l.latency = Math.max(8, Math.round(l.latency + (Math.random() - 0.5) * 10));
-      });
-      /* Shell 心跳抖动 */
-      state.shells.forEach((s) => {
-        if (!s.alive) return;
-        s.latency = Math.max(6, Math.round(s.latency + (Math.random() - 0.5) * 6));
-      });
+      /* 延迟 / 心跳一律以服务端真实探针结果为准（WS shell.beat / link.state），
+         此处不再本地伪造随机抖动（旧 mock 会让人误以为心跳在真实工作）。 */
     }, 1000);
   }
   function toggleTimer() {
@@ -332,64 +326,58 @@
     toast('该主机暂无存活 Shell，请先获取会话', 'err');
   }
   function heartbeatAll() {
-    state.shells.forEach((s) => {
-      if (s.alive) s.lastBeat = '刚刚';
-    });
-    toast('已对 ' + state.shells.filter((s) => s.alive).length + ' 个会话发起心跳', 'ok');
-    if (apiMode) PivotAPI.post('/api/shells/heartbeat').catch(() => {});
+    if (!apiMode) { toast('后端不可用：请先启动 python -m pivothub', 'err'); return; }
+    toast('心跳探测中…', 'info');
+    PivotAPI.post('/api/shells/heartbeat')
+      .then((out) => {
+        const beat = (out && out.beat) || 0;
+        const lost = (out && out.lost) || [];
+        /* 行内绿点 / 延迟 / 最后心跳由后端逐会话 WS shell.beat 帧更新，这里只报总账 */
+        toast('心跳完成：真实探针存活 ' + beat + ' 个'
+          + (lost.length ? ' · 失联 ' + lost.length + ' 个已标记断线' : ''),
+          lost.length ? 'warn' : 'ok');
+      })
+      .catch((e) => toast('心跳失败：' + String((e && e.message) || e), 'err'));
   }
   function testShell(s) {
-    if (apiMode) {
-      PivotAPI.post('/api/shells/' + s.id + '/test')
-        .then((out) => {
-          Object.assign(s, out);
-          if (out.alive) toast('连通性正常 · 延迟 ' + out.latency + 'ms', 'ok');
-          else toast('连通性测试失败，已标记断线', 'err');
-        })
-        .catch(() => toast('连通性测试失败（后端不可用）', 'err'));
-      return;
-    }
-
+    if (!apiMode) { toast('后端不可用：请先启动 python -m pivothub', 'err'); return; }
+    PivotAPI.post('/api/shells/' + s.id + '/test')
+      .then((out) => {
+        Object.assign(s, out);
+        if (out.alive) toast('连通性正常 · 延迟 ' + out.latency + 'ms', 'ok');
+        else toast('连通性测试失败，已标记断线', 'err');
+      })
+      .catch((e) => toast('连通性测试失败：' + String((e && e.message) || e), 'err'));
   }
   function removeShell(s) {
-    const i = state.shells.indexOf(s);
-    if (i >= 0) state.shells.splice(i, 1);
-    toast('已删除 Shell 会话', 'info');
-    if (apiMode) PivotAPI.del('/api/shells/' + s.id).catch(() => {});
+    if (!apiMode) { toast('后端不可用：请先启动 python -m pivothub', 'err'); return; }
+    /* 先服务端删除成功再动本地列表：删除失败时不许造成「界面没了、库里还在」的假象 */
+    PivotAPI.del('/api/shells/' + s.id)
+      .then(() => {
+        const i = state.shells.indexOf(s);
+        if (i >= 0) state.shells.splice(i, 1);
+        toast('已删除 Shell 会话', 'info');
+      })
+      .catch((e) => toast('删除 Shell 失败：' + String((e && e.message) || e), 'err'));
   }
   function addShell(form) {
-    /* 服务端生成 id；乐观插入保证视图同步拿到会话对象 */
-    const host = hostsById[form.hostId];
-    const optimistic = {
-      id: rid('s'), hostId: form.hostId, type: form.type, url: form.url,
-      pass: form.pass, encoder: form.encoder, alive: true,
-      latency: 18 + Math.round(Math.random() * 50), lastBeat: '刚刚',
-      hostname: host ? host.hostname : '', privilege: host ? host.privilege : '',
-      stable: false,
-    };
-    if (apiMode) {
-      PivotAPI.post('/api/shells', {
-        projectId: state.projectId, hostId: form.hostId, type: form.type,
-        url: form.url, pass: form.pass, encoder: form.encoder, autoCollect: !!form.autoCollect,
-      }).then((item) => {
-        const i = state.shells.indexOf(optimistic);
-        if (i >= 0) state.shells.splice(i, 1, item);
-      }).catch(() => { /* 后端失联：保留乐观条目，稍后刷新会以服务端为准 */ });
-      if (host) host.owned = true;
-      return optimistic;
+    /* 不做乐观插入：登记接口会做真实连通测试（死靶最长 6s），
+       在服务端返回前用本地伪造 id 选中/开终端会得到 404（旧实现右下角报错、
+       过一会才正常的原因）。成功后才入列表，失败如实报错并保留表单。 */
+    if (!apiMode) {
+      return Promise.reject(new Error('后端不可用：请先启动 python -m pivothub'));
     }
-    state.shells.push(optimistic);
-    if (host) host.owned = true;
-    addEvent('shell', '登记并连接 Shell：' + optimistic.url, { hostId: form.hostId, detail: '类型 ' + form.type + ' · 编码器 ' + form.encoder });
-    if (form.autoCollect) {
-      toast('已自动回传基础信息并入库资产表', 'ok');
-      addEvent('host', '自动回传基础信息并入库', {
-        hostId: form.hostId,
-        detail: 'whoami=' + (host ? host.privilege || 'unknown' : 'unknown') + ' / uname=' + (host ? host.os : '') + ' / ip=' + (host ? host.ip : ''),
-      });
-    }
-    toast('Shell 已保存并连接成功', 'ok');
-    return optimistic;
+    return PivotAPI.post('/api/shells', {
+      projectId: state.projectId, hostId: form.hostId || '', type: form.type,
+      url: form.url, pass: form.pass, encoder: form.encoder, autoCollect: !!form.autoCollect,
+    }).then((item) => {
+      if (!state.shells.some((s) => s.id === item.id)) state.shells.push(item);
+      const host = hostsById[item.hostId];
+      if (host && item.alive) host.owned = true;
+      if (item.alive) toast('Shell 已登记并连通 · 延迟 ' + item.latency + 'ms', 'ok');
+      else toast('Shell 已登记，但连通性测试失败：已按断线标记（可修正后点「测试」重探）', 'warn');
+      return item;
+    });
   }
 
   /* ---------- 虚拟终端 ---------- */
@@ -569,10 +557,10 @@
           }
           applyDetectResult(s, out);
         })
-        .catch(() => {
+        .catch((e) => {
           termState.detecting = false;
           clearTtyCache(s.id);
-          failApi('交互能力检测');
+          failApi('交互能力检测', e);
         });
       return;
     }
@@ -698,7 +686,7 @@
     if (apiMode) {
       PivotAPI.post('/api/shells/' + s.id + '/tty/upgrade', { fixId: recipe.id })
         .then((out) => {
-          if (out && out.pivothubFallback) { failApi('该能力'); return; }
+          if (out && out.pivothubFallback) { failApi('终端固化技法', (out && out.reason) || '后端不可用'); return; }
           const cmd = renderTtyCmd(recipe.cmd);
           cmd.split(/\r?\n/).filter((l) => l.trim()).forEach((l) => {
             if (l.trim().startsWith('#')) termPush('dim', escapeHtml(l));
@@ -720,7 +708,7 @@
             clearTtyCache(s.id);
           }
         })
-        .catch(() => failApi('终端固化'));
+        .catch((e) => failApi('终端固化', e));
       return;
     }
 
@@ -733,7 +721,7 @@
     if (apiMode) {
       PivotAPI.post('/api/shells/' + s.id + '/tty/finish', { rows: 40, cols: 120 })
         .then((out) => {
-          if (out && out.pivothubFallback) { failApi('该能力'); return; }
+          if (out && out.pivothubFallback) { failApi('固化收尾', (out && out.reason) || '后端不可用'); return; }
           termPush('dim', '# 收尾三步：挂起 → raw 模式 → reset');
           termPush('in', 'stty sane; stty rows ' + (out.rows || 40) + ' cols ' + (out.cols || 120));
           termPush('ok', (out && out.summary) || 'raw 模式已开启，终端状态已重置');
@@ -749,7 +737,7 @@
           }
           /* 收尾事件由服务端入库 */
         })
-        .catch(() => failApi('固化收尾'));
+        .catch((e) => failApi('固化收尾', e));
       return;
     }
 
@@ -786,7 +774,7 @@
     if (apiMode) {
       PivotAPI.post('/api/shells/' + s.id + '/exec', { cmd: c })
         .then((out) => {
-          if (out && out.pivothubFallback) { failApi('该能力'); return; }
+          if (out && out.pivothubFallback) { failApi('命令执行', (out && out.reason) || '后端不可用'); return; }
           if (!out || out.ok === false) {
             const why = (out && (out.error || out.reason)) || '未知原因';
             termPush('err', escapeHtml('执行失败：' + why));
@@ -875,7 +863,7 @@
     return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  /* ---------- 文件管理（Shell 管理侧栏与「文件管理」视图共用） ---------- */
+  /* ---------- 文件管理（「文件管理」大标签页专用） ---------- */
 
   /* 上传通道：pull = 攻击机 HTTP 暂存 + 目标机 curl/wget 拉取；chunk = 原分片直传；
      auto = 先拉取，失败自动回退分片。选择持久化到 localStorage。 */
@@ -1243,7 +1231,7 @@
         toast('已删除链路记录：' + l.tool + '（进程已清理）', 'ok');
         return true;
       })
-      .catch(() => { failApi('删除链路'); return false; });
+      .catch((e) => { failApi('删除链路', e); return false; });
   }
 
   /* ---------- 攻击机网络（GET/PUT /api/attack，任务 C-A） ---------- */
@@ -1298,6 +1286,31 @@
   function reverseListeners() {
     if (!hasApi) return Promise.resolve({ listeners: [] });
     return PivotAPI.get('/api/shells/reverse/listeners').catch(() => ({ listeners: [] }));
+  }
+
+  /* 载荷库（GET /api/shells/reverse/payloads|payload）：语法 × 编码 × 平台，
+     由后端按 ip/port 渲染并按目标探测到的工具集标注可用性。
+     tools 为空 = 未探测 → 不做可用性断言（不误报「不可用」）。 */
+  function reversePayloads(opts) {
+    if (!hasApi) return Promise.resolve({ ok: false, stage: 'offline', error: '后端不可用（请启动 python -m pivothub）' });
+    const q = new URLSearchParams({
+      ip: (opts && opts.ip) || '', port: String((opts && opts.port) || 0),
+      platform: (opts && opts.platform) || '',
+      tools: ((opts && opts.tools) || []).join(','),
+    });
+    return PivotAPI.get('/api/shells/reverse/payloads?' + q.toString())
+      .catch((e) => ({ ok: false, stage: 'request', error: String((e && e.message) || e) }));
+  }
+
+  function reversePayload(opts) {
+    if (!hasApi) return Promise.resolve({ ok: false, stage: 'offline', error: '后端不可用（请启动 python -m pivothub）' });
+    const q = new URLSearchParams({
+      id: (opts && opts.id) || 'bash-tcp', encode: (opts && opts.encode) || 'raw',
+      ip: (opts && opts.ip) || '', port: String((opts && opts.port) || 0),
+      tools: ((opts && opts.tools) || []).join(','),
+    });
+    return PivotAPI.get('/api/shells/reverse/payload?' + q.toString())
+      .catch((e) => ({ ok: false, stage: 'request', error: String((e && e.message) || e) }));
   }
 
   /* 重试恢复面板重启时未能自动拉起的监听（地址又回来了等场景） */
@@ -1643,7 +1656,7 @@
           hostsById[item.id] = item;
         }
         toast('主机已登记并上拓扑', 'ok');
-      }).catch(() => failApi('登记主机'));
+      }).catch((e) => failApi('登记主机', e));
       return null;
     }
     return null;
@@ -1699,7 +1712,7 @@
         addEvent('host', '移除资产 ' + h.ip, { detail: extra.join(' / ') });
         return true;
       })
-      .catch(() => { failApi('移除资产'); return false; });
+      .catch((e) => { failApi('移除资产', e); return false; });
   }
   function importScan(text) {
     if (apiMode) {
@@ -1708,7 +1721,7 @@
           toast(out.added ? '已入库 ' + out.added + ' 台主机' : '未解析到新主机', out.added ? 'ok' : 'err');
           if (out.added) refreshState();
         })
-        .catch(() => failApi('导入扫描结果'));
+        .catch((e) => failApi('导入扫描结果', e));
       return;
     }
 
@@ -1721,7 +1734,7 @@
       }).then((item) => {
         if (!state.creds.some((x) => x.id === item.id)) state.creds.push(item);
         toast('凭据已入库', 'ok');
-      }).catch(() => failApi('登记凭据'));
+      }).catch((e) => failApi('登记凭据', e));
       return;
     }
 
@@ -1734,7 +1747,7 @@
       }).then((item) => {
         if (!state.flags.some((x) => x.id === item.id)) state.flags.push(item);
         toast('Flag 已记录', 'ok');
-      }).catch(() => failApi('记录 Flag'));
+      }).catch((e) => failApi('记录 Flag', e));
       return;
     }
 
@@ -1744,7 +1757,7 @@
       PivotAPI.post('/api/timeline/notes', {
         projectId: state.projectId, title: form.title, hostId: form.hostId || null,
         cmd: form.cmd || '', markdown: form.markdown || '',
-      }).then(() => toast('笔记已加入时间线', 'ok')).catch(() => failApi('添加笔记'));
+      }).then(() => toast('笔记已加入时间线', 'ok')).catch((e) => failApi('添加笔记', e));
       return;
     }
 
@@ -1905,7 +1918,22 @@
     if (!hasApi) return Promise.resolve(false);
     return PivotAPI.getState(state.projectId)
       .then((data) => { applyState(data); return true; })
-      .catch(() => false);
+      .catch(() => {
+        /* 当前 projectId 在后端不存在（移植换机 / 库被重建 / 默认项目 ID 不一致）：
+           拉项目列表切到第一个可用项目再试一次。后端本身活着就绝不误报「后端不可用」，
+           否则 WS 永远不会连接，整个面板看起来像死机。 */
+        if (!hasApi) return false;
+        return PivotAPI.get('/api/projects').then((list) => {
+          const first = Array.isArray(list) && list[0];
+          if (first && first.id && first.id !== state.projectId) {
+            state.projectId = first.id;
+            return PivotAPI.getState(state.projectId)
+              .then((data) => { applyState(data); return true; })
+              .catch(() => false);
+          }
+          return false;
+        }).catch(() => false);
+      });
   }
 
   /* WebSocket 事件按 type 分派（README §6.2） */
@@ -2076,6 +2104,7 @@
     testLink, restartLink, stopLink, removeLink,
     saveAttack, saveAttackFor, netinfo, saveTools, saveStages, deployLink, relayPlan, probeShell,
     reverseListen, reverseListeners, reverseRestoreListeners, reverseRegister, reverseCloseListener, reverseCloseAll,
+    reversePayloads, reversePayload,
     dbList, dbCreate, dbDelete, dbTest, dbQuery, dbTables, dbSchema,
     pluginsList, pluginInstall, pluginToggle, pluginUninstall,
     privescRules, privescScan, execOn, shellEscalate, shellEscalateClear,

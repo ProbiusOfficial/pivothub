@@ -45,7 +45,8 @@ def lab(client, tmp_path_factory):
     shell = r.json()
     assert shell["alive"] is True, "miniweb 靶应通过真实协议探针"
 
-    yield {"shellId": shell["id"], "hostId": host_id, "docroot": str(docroot)}
+    yield {"shellId": shell["id"], "hostId": host_id, "docroot": str(docroot),
+           "port": srv.server_address[1]}
     srv.shutdown()
 
 
@@ -169,6 +170,108 @@ def test_stable_persisted_after_full_loop(client, lab):
     d = client.get("/api/projects/proj-1/state").json()
     s = next(x for x in d["shells"] if x["id"] == lab["shellId"])
     assert s["stable"] is False  # 本机靶无法建立 Linux PTY → 不允许虚标
+
+
+# ---------------------------------------------------------------------------
+# 归属主机自动登记 / 添加前连通性测试（dry-run）/ 全量心跳
+# ---------------------------------------------------------------------------
+
+def test_add_shell_without_host_autoregisters_from_url(client, lab):
+    """归属主机留空：按 URL 中的主机地址自动登记进主机库（人工再补信息）。"""
+    r = client.post("/api/shells", json={
+        "hostId": "", "type": "PHP 一句话马",
+        "url": f"http://127.0.0.1:{lab['port']}/auto.php",
+        "pass": "cmd", "encoder": "none", "autoCollect": False,
+    })
+    assert r.status_code == 200, r.text
+    shell = r.json()
+    assert shell["alive"] is True
+    host = client.get("/api/projects/proj-1/state").json()["hosts"]
+    h = next(x for x in host if x["id"] == shell["hostId"])
+    assert h["ip"] == "127.0.0.1"          # 从 URL 提取的地址
+    assert "自动登记" in (h.get("note") or "")
+
+
+def test_add_shell_reuses_existing_host_by_url_ip(client, lab):
+    """URL 地址命中既有主机：直接复用，不重复建主机。"""
+    before = len(client.get("/api/projects/proj-1/state").json()["hosts"])
+    r = client.post("/api/shells", json={
+        "hostId": "", "type": "PHP 一句话马",
+        "url": f"http://127.0.0.9:{lab['port']}/reuse.php",   # 127.0.0.9 = lab 主机
+        "pass": "cmd", "encoder": "none", "autoCollect": False,
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["hostId"] == lab["hostId"]
+    after = len(client.get("/api/projects/proj-1/state").json()["hosts"])
+    assert after == before
+
+
+def test_add_shell_without_host_and_bad_url_reports_reason(client):
+    """URL 里也解析不出主机地址：400 且提示可操作（选归属主机 / 补全 URL）。"""
+    r = client.post("/api/shells", json={
+        "hostId": "", "type": "PHP 一句话马", "url": "not-a-url",
+        "pass": "cmd", "encoder": "none",
+    })
+    assert r.status_code == 400
+    assert "归属主机" in r.json()["detail"]
+
+
+def test_add_shell_with_unknown_host_reports_hostid(client, lab):
+    """显式给了不存在的 hostId：404 详情须带出 hostId，而不是笼统的「主机不存在」。"""
+    r = client.post("/api/shells", json={
+        "hostId": "h-nope", "type": "PHP 一句话马",
+        "url": f"http://127.0.0.1:{lab['port']}/x.php",
+        "pass": "cmd", "encoder": "none",
+    })
+    assert r.status_code == 404
+    assert "h-nope" in r.json()["detail"]
+
+
+def test_connection_dry_run_ok(client, lab):
+    """添加弹窗「连通性测试」：真实探针，不落库。"""
+    n_before = len(client.get("/api/projects/proj-1/state").json()["shells"])
+    r = client.post("/api/shells/test-connection", json={
+        "type": "PHP 一句话马",
+        "url": f"http://127.0.0.1:{lab['port']}/dry.php",
+        "pass": "cmd", "encoder": "none",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True and body["latency"] >= 0
+    n_after = len(client.get("/api/projects/proj-1/state").json()["shells"])
+    assert n_after == n_before, "dry-run 不得创建会话记录"
+
+
+def test_connection_dry_run_dead_target_honest_error(client):
+    """死靶：如实返回失败与原因（不许假成功）。"""
+    r = client.post("/api/shells/test-connection", json={
+        "type": "PHP 一句话马",
+        "url": "http://127.0.0.1:1/dead.php",   # 端口 1 无人监听
+        "pass": "cmd", "encoder": "none",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False and body["error"]
+
+
+def test_connection_dry_run_unknown_type_honest_error(client):
+    """未支持的 WebShell 类型（如冰蝎）：如实报不支持。"""
+    r = client.post("/api/shells/test-connection", json={
+        "type": "冰蝎", "url": "http://127.0.0.1:1/x",
+        "pass": "cmd", "encoder": "none",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False and "支持" in body["error"]
+
+
+def test_heartbeat_real_counts(client, lab):
+    """全量心跳：返回真实存活数；失联会话以 id 列表带回。"""
+    r = client.post("/api/shells/heartbeat")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["beat"] >= 1          # miniweb 靶真实探针通过
+    assert isinstance(body["lost"], list)
 
 
 # ---------------------------------------------------------------------------

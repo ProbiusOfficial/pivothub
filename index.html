@@ -385,7 +385,7 @@
     <div class="view-head">
       <div>
         <h2>Shell 管理</h2>
-        <p class="muted">连接登记 · 连通性测试 · 存活心跳 · 虚拟终端 · 终端固化 · 文件管理</p>
+        <p class="muted">连接登记 · 连通性测试 · 存活心跳 · 虚拟终端 · 终端固化（文件管理已独立到左侧「文件管理」页）</p>
       </div>
       <div class="view-head-actions">
         <button class="btn btn-sm" @click="heartbeatAll()">
@@ -549,33 +549,6 @@
         </div>
       </div>
 
-      <!-- 文件管理 -->
-      <aside class="split-side" v-if="activeShell">
-        <div class="panel file-panel">
-          <div class="panel-head">
-            <h3>文件管理</h3>
-            <button class="btn btn-xs" @click="upload()">上传</button>
-          </div>
-          <div class="crumb mono">
-            <button class="crumb-btn" v-for="(c, i) in file.crumbs" :key="i" @click="cd(i)">{{ c }}{{ i ? '/' : '' }}</button>
-          </div>
-          <div class="file-list">
-            <div class="file-row" v-for="f in file.entries" :key="f.name" @click="f.dir ? cdPath(f.name) : openFile(f)">
-              <svg class="ico" viewBox="0 0 24 24" v-html="icon(f.dir ? 'folder' : 'file')"></svg>
-              <span class="grow mono ellipsis">{{ f.name }}</span>
-              <span class="muted mono">{{ f.dir ? 'DIR' : f.size }}</span>
-            </div>
-            <p class="muted tiny" v-if="file.loading">加载中…</p>
-            <p class="muted tiny text-err" v-else-if="file.error">列目录失败：{{ file.error }}</p>
-            <p class="muted tiny" v-else-if="!file.entries.length">目录为空</p>
-          </div>
-          <div class="upload-bar" v-if="file.uploading">
-            <span class="mono grow">上传 {{ file.uploading }}…{{ file.phase ? ' · ' + file.phase : '' }}</span>
-            <div class="progress"><i :style="{ width: file.progress + '%' }"></i></div>
-          </div>
-          <p class="muted tiny">完整功能见左侧「文件管理」；上传通道「{{ uploadModeText() }}」可在文件管理视图切换（HTTP 拉取 / 分片直传 / 自动）。</p>
-        </div>
-      </aside>
     </div>
 
     <!-- 添加 Shell 弹窗 -->
@@ -609,6 +582,7 @@
           <label class="field">
             <span>归属主机</span>
             <select class="input" v-model="form.hostId">
+              <option value="">自动（按 URL 中的地址登记归属）</option>
               <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.ip }}（{{ h.layer }}）</option>
             </select>
           </label>
@@ -618,9 +592,9 @@
           </label>
         </div>
         <div class="modal-foot">
-          <span class="grow muted tiny" v-if="form.testResult" :class="form.testResult.ok ? 'text-ok' : 'text-err'">{{ form.testResult.msg }}</span>
-          <button class="btn" @click="testForm()">连通性测试</button>
-          <button class="btn btn-primary" @click="save()">保存并连接</button>
+          <span class="grow muted tiny" v-if="form.testResult" :class="form.testResult.ok === true ? 'text-ok' : form.testResult.ok === false ? 'text-err' : 'muted'">{{ form.testResult.msg }}</span>
+          <button class="btn" @click="testForm()" :disabled="testing">{{ testing ? '测试中…' : '连通性测试' }}</button>
+          <button class="btn btn-primary" @click="save()" :disabled="saving">{{ saving ? '正在连接测试…' : '保存并连接' }}</button>
         </div>
       </div>
     </div>
@@ -1396,12 +1370,29 @@
             本机当前地址：<span class="mono">{{ detected.join(' / ') }}</span>
             <button class="btn btn-xs btn-ghost" @click="useDetected()">使用检测到的地址</button>
           </p>
-          <label class="field">
-            <span>反弹载荷</span>
-            <select class="input" v-model="kind">
-              <option v-for="k in kinds" :key="k.key" :value="k.key">{{ k.label }}</option>
-            </select>
-          </label>
+          <div class="form-row">
+            <label class="field">
+              <span>反弹载荷（语法）</span>
+              <select class="input" v-model="payloadId">
+                <optgroup v-for="g in kindGroups" :key="g.label" :label="g.label">
+                  <option v-for="it in g.items" :key="it.id" :value="it.id">
+                    {{ it.label }}{{ it.available === false ? ' ⚠ 缺 ' + it.needs.join('/') : '' }}{{ ctxMismatch(it) ? ' ⚠ 与执行语境不符' : '' }}
+                  </option>
+                </optgroup>
+              </select>
+            </label>
+            <label class="field">
+              <span>编码方式（绕过特殊字符干扰）</span>
+              <select class="input" v-model="encode">
+                <option v-for="e in encoders" :key="e.key" :value="e.key">{{ e.label }}</option>
+              </select>
+            </label>
+          </div>
+          <p class="muted tiny">
+            <button class="btn btn-xs" :disabled="probing" @click="probeTools()">{{ probing ? '探测中…' : '探测执行语境 / 可用工具' }}</button>
+            <span v-if="tools"> 已确认可用：<span class="mono">{{ tools.join(' / ') }}</span></span>
+            <span v-else> 探测后会在载荷下拉里标注「缺哪个工具 / 与执行语境不符」（未探测则不臆断）</span>
+          </p>
           <label class="field">
             <span>登记主机（回连后归属哪台机器；留空 = 按回连对端 IP 自动创建）</span>
             <select class="input" v-model="manualHostId">
@@ -1410,6 +1401,12 @@
             </select>
           </label>
           <pre class="code-block code-xs"><code>{{ payload() }}</code></pre>
+          <p class="muted tiny" v-if="renderError">{{ renderError }}</p>
+          <p class="muted tiny" v-if="renderInfo && renderInfo.note">语法说明：{{ renderInfo.note }}</p>
+          <p class="muted tiny" v-if="renderInfo && renderInfo.encodeNote">编码说明：{{ renderInfo.encodeNote }}</p>
+          <p class="term-warn tiny" v-if="missingOf.length">
+            ⚠ 当前组合依赖 {{ missingOf.join(' / ') }}：目标未探测到该工具，下发后大概率失败（可换编码方式或换语法）
+          </p>
           <div class="row-gap">
             <button class="btn btn-primary" :disabled="running" @click="start()">{{ running ? '监听中…' : '① 开始监听' }}</button>
             <button class="btn" :disabled="!running" @click="send()">② 发送到该会话</button>

@@ -1,5 +1,7 @@
 /* ============================================================
-   Shell 管理视图 — 连接登记 / 连通性测试 / 虚拟终端 / 文件管理
+   Shell 管理视图 — 连接登记 / 连通性测试 / 虚拟终端 / 终端固化
+   （文件管理已独立到左侧「文件管理」大标签页；本视图不再内嵌文件面板，
+     避免与虚拟终端抢同一会话的命令通道而拖慢回连）
    ============================================================ */
 (function (global) {
   'use strict';
@@ -20,34 +22,31 @@
         pass: 'rebeyond',
         url: 'http://192.168.100.10/upload/shell.php',
         encoder: 'base64',
-        hostId: S.state.hosts[1] ? S.state.hosts[1].id : '',
+        /* 归属主机默认「自动」：后端按 URL 中的主机地址匹配既有主机，
+           命中不了就自动登记进主机库，之后人工补充主机名 / 系统 / 层级即可 */
+        hostId: '',
         autoCollect: true,
         testResult: null,
       });
-
-      const file = reactive(S.fileStateFor(null));
+      const saving = ref(false);
+      const testing = ref(false);
 
       const activeShell = computed(() => S.activeShell());
 
       /* Shell 管理只列「非 SSH」会话（SSH 已独立到「SSH 会话」页）；
-         SSH 会话仍留在 state.shells 里，交互终端 / 文件管理 / 其它视图照常可用。 */
+         SSH 会话仍留在 state.shells 里，交互终端 / 其它视图照常可用。
+         文件管理统一走左侧「文件管理」大标签页。 */
       const listShells = computed(() =>
         S.state.shells.filter((s) => s.kind !== 'ssh')
           .sort((a, b) => (b.alive ? 1 : 0) - (a.alive ? 1 : 0)));
       const sshCount = computed(() => S.state.shells.filter((s) => s.kind === 'ssh').length);
 
-      function loadFileState() {
-        const fs = S.fileStateFor(ui.selectedShellId);
-        Object.assign(file, fs);
-        S.refreshFileEntries(file);
-      }
       watch(() => ui.selectedShellId, (id, prevId) => {
         /* 切走时关闭上一个反弹会话的原始推送，避免后台无谓占用 */
         if (prevId && prevId !== id) {
           const prev = S.state.shells.find((x) => x.id === prevId);
           if (prev && prev.kind === 'reverse') S.setRaw(prevId, false);
         }
-        loadFileState();
       }, { immediate: true });
       watch(() => termState.rawLines.length, () => { scrollTerm(); });
       watch(activeShell, (s) => {
@@ -133,16 +132,7 @@
       }
       function clearTerm() { S.clearTerm(); }
       function killTerm() { S.killTerm(); }
-      function openTerminal(id) { S.openTerminalById(id); nextTick(() => { loadFileState(); scrollTerm(); }); }
-
-      /* ---------- 文件管理 ---------- */
-      function cd(i) { S.cdIndex(file, i); }
-      function cdPath(name) { S.cdInto(file, name); }
-      function openFile(f) {
-        if (S.isApiMode() && S.readFile(f, file)) return; /* 编辑弹窗为全局共享 */
-        S.toast('读取失败：后端不可用或文件不可读', 'err');
-      }
-      function upload() { S.pickAndUpload(file); }
+      function openTerminal(id) { S.openTerminalById(id); nextTick(() => scrollTerm()); }
 
       /* ---------- 连接管理 ---------- */
       /* 提升为 SSH 会话：跳到「SSH 会话」页并带上当前选中会话，由该页预填目标后做真实连接测试。
@@ -157,15 +147,43 @@
         form.testResult = null;
         ui.modal = 'shell-add';
       }
+      /* 连通性测试：真实后端探针（dry-run 不落库）。旧实现是本地随机假结果
+         （永远「HTTP 200 · 延迟 xx ms」），已按「报错必须有依据」原则移除。 */
       function testForm() {
-        form.testResult = { ok: true, msg: '连通性测试通过（HTTP 200 · 回显正常 · 延迟 ' + (20 + Math.round(Math.random() * 40)) + 'ms）' };
+        if (!form.url) { form.testResult = { ok: false, msg: '请先填写 URL' }; return; }
+        if (!S.isApiMode()) {
+          form.testResult = { ok: false, msg: '后端不可用：请先启动 python -m pivothub' };
+          return;
+        }
+        testing.value = true;
+        form.testResult = { ok: null, msg: '真实探针测试中…（最长 6 秒）' };
+        PivotAPI.post('/api/shells/test-connection', {
+          type: form.type, url: form.url, pass: form.pass, encoder: form.encoder,
+        }).then((out) => {
+          testing.value = false;
+          if (out && out.ok) {
+            form.testResult = { ok: true, msg: '连通性测试通过 · 延迟 ' + out.latency + 'ms' };
+          } else {
+            form.testResult = { ok: false, msg: '测试失败：' + ((out && out.error) || '目标无回显') };
+          }
+        }).catch((e) => {
+          testing.value = false;
+          form.testResult = { ok: false, msg: '测试失败：' + String((e && e.message) || e) };
+        });
       }
       function save() {
+        if (saving.value) return;
         if (!form.url || !form.pass) { S.toast('URL 与密码不能为空', 'err'); return; }
-        const s = S.addShell(form);
-        ui.modal = null;
-        ui.selectedShellId = s.id;
-        nextTick(() => { loadFileState(); S.initTerm(); scrollTerm(); });
+        saving.value = true;
+        S.addShell(form).then((s) => {
+          saving.value = false;
+          ui.modal = null;
+          ui.selectedShellId = s.id;  /* 服务端真实 id：立即选中 / 开终端都不会 404 */
+          nextTick(() => { S.initTerm(); scrollTerm(); });
+        }).catch((e) => {
+          saving.value = false;
+          S.toast('添加失败：' + String((e && e.message) || e), 'err');
+        });
       }
       function test(s) { S.testShell(s); }
       function remove(s) {
@@ -357,17 +375,16 @@
       }
 
       return {
-        ui, termEl, termInputEl, termInput, termState, activeTerm: termState, file, form, activeShell,
+        ui, termEl, termInputEl, termInput, termState, activeTerm: termState, form, activeShell,
         shells: S.state.shells, hosts: S.state.hosts,
         listShells, sshCount,
         shellTypes: S.state.shellTypes || [], encoders: S.state.encoders || [],
         hintCommands: S.HINT_CMDS,
         ipOf: S.ipOf, copy: S.copy, icon: global.icon, goto: S.goto,
-        uploadModeText: S.uploadModeText,
         submitTerm, focusTerm, sendKey, upgradePty, histPrev, histNext, complete, clearTerm, killTerm, openTerminal,
         modeBadge,
-        cd, cdPath, openFile, upload,
         openAdd, testForm, save, test, remove, heartbeatAll, latencyClass,
+        saving, testing,
         promoteToSsh,
         fixFilter, fixes, appliedList, ttyMode, ps1,
         detectTty, applyFix, finishTty, copyFix, sendFix, isApplied, fixCmdText,

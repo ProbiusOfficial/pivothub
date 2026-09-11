@@ -45,7 +45,8 @@ class ShellIn(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     projectId: str = ""
-    hostId: str
+    #: 可选：归属主机。留空时由后端按 URL 中的主机地址自动匹配/登记（与反弹回连同策略）
+    hostId: str = ""
     type: str = "PHP 一句话马"
     url: str
     pass_: str = Field(default="", alias="pass")

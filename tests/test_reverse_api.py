@@ -521,3 +521,35 @@ def test_detect_platform_from_echo():
         "ver": "Microsoft Windows [版本 10.0.19045.2965]",
     })) == "windows"
     assert detect_platform(Fake({})) == ""
+
+
+def test_listener_marked_consumed_after_register(client, sandbox_project):
+    """登记后监听必须自报「已转为会话」：socket 已随 take() 关闭，不能再显示等待回连。"""
+    port = _free_port()
+    lid = client.post("/api/shells/reverse/listen",
+                      json={"bind": "127.0.0.1", "port": port, "waitS": 0}).json()["listener"]["id"]
+    ready = threading.Event()
+    threading.Thread(target=_echo_client, args=(port, ready), daemon=True).start()
+    assert ready.wait(3)
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        me = next((x for x in client.get("/api/shells/reverse/listeners").json()["listeners"]
+                   if x["id"] == lid), None)
+        if me and me["connected"]:
+            break
+        time.sleep(0.2)
+
+    reg = client.post("/api/shells/reverse/register", json={
+        "projectId": sandbox_project, "listenerId": lid, "hostIp": "127.0.0.1",
+        "type": "反弹 Shell（pytest-consumed）", "autoCollect": False}).json()
+    assert reg["ok"] is True
+
+    me = next(x for x in client.get("/api/shells/reverse/listeners").json()["listeners"]
+              if x["id"] == lid)
+    assert me["connected"] is False
+    assert me["consumed"] is True          # 面板据此显示「已转为会话」而不是「等待回连」
+
+    # 清理：删掉监听记录与会话
+    client.delete(f"/api/shells/reverse/listeners/{lid}")
+    client.delete(f"/api/shells/{reg['shell']['id']}")

@@ -331,6 +331,7 @@ select.input option { background: var(--bg-1); color: var(--text); }
 .term-in { color: var(--text); }
 .term-out { color: #b6cbd8; }
 .term-err { color: var(--err); }
+.term-warn { color: var(--warn); }
 .term-ok { color: var(--accent); }
 .term-dim { color: var(--text-mute); }
 .term-ps1 { color: var(--accent); }
