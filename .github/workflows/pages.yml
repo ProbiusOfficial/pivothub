@@ -1,9 +1,5 @@
 name: Deploy landing page to GitHub Pages
 
-# 介绍页在 docs/index.html（自包含单文件，图片用 docs/screenshots/ 里的演示截图）。
-# 发布方式二选一：
-#   A. 本工作流（推荐）：仓库 Settings → Pages → Source 选「GitHub Actions」，push 到 main 即自动发布；
-#   B. 不用 Actions：Settings → Pages → Source 选「Deploy from a branch」，分支 main / 目录 /docs。
 on:
   push:
     branches: [main]
