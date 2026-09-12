@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PivotHub · 链透中枢 — 多层内网渗透辅助工具</title>
+<meta name="description" content="PivotHub（链透中枢）：面向 CTF / 授权靶场的多层内网渗透辅助面板 —— 会话统一抽象、反弹 Shell 载荷库、终端固化、代理编排、资产探测、数据库面板、Flag 墙与复盘导出一条龙。FastAPI + SQLite + Vue 3，本地运行、不伪造数据。" />
+<meta name="keywords" content="内网渗透,CTF,靶场,反弹Shell,chisel,frp,fscan,Shiro,Log4Shell,渗透测试面板,FastAPI,Vue" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="PivotHub · 链透中枢 — 多层内网渗透辅助工具" />
+<meta property="og:description" content="会话统一抽象 · 反弹载荷库 · 终端固化 · 代理编排 · 资产探测 · Flag 墙与复盘导出。本地运行，仅用于 CTF / 授权靶场。" />
+<meta property="og:image" content="screenshots/01-阶段看板.jpg" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23050a0e'/%3E%3Cpath d='M9 22V10h6.2c2.9 0 4.6 1.5 4.6 4s-1.7 4-4.6 4H12v4z' fill='%2300e5a0'/%3E%3Ccircle cx='23' cy='21' r='2' fill='%2300e5a0'/%3E%3C/svg%3E" />
+<style>
+  :root{
+    --bg:#050a0e; --bg2:#08111a; --panel:#0c1622; --panel2:#0f1c2a;
+    --border:#16283a; --border2:#1f3a52;
+    --text:#d7e4ec; --dim:#8ba0ae; --dim2:#5f7683;
+    --accent:#00e5a0; --accent-dim:#00b57e; --warn:#ffb020; --err:#ff5f6d; --info:#4aa8ff;
+    --mono:"JetBrains Mono",Consolas,"SFMono-Regular",Menlo,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    --max:1120px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.75 var(--sans);
+       -webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,kbd,pre{font-family:var(--mono)}
+  .wrap{max-width:var(--max);margin:0 auto;padding:0 22px}
+  .mono{font-family:var(--mono)}
+
+  /* ---------- 背景网格 ---------- */
+  .grid-bg{position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:
+      radial-gradient(900px 480px at 12% -8%,rgba(0,229,160,.10),transparent 60%),
+      radial-gradient(760px 420px at 92% 4%,rgba(74,168,255,.08),transparent 60%),
+      linear-gradient(rgba(22,40,58,.34) 1px,transparent 1px) 0 0/48px 48px,
+      linear-gradient(90deg,rgba(22,40,58,.34) 1px,transparent 1px) 0 0/48px 48px,
+      var(--bg);}
+  .grid-bg::after{content:"";position:absolute;inset:0;
+    background:radial-gradient(circle at 50% 0,transparent 30%,var(--bg) 88%)}
+
+  /* ---------- 顶栏 ---------- */
+  header{position:sticky;top:0;z-index:50;backdrop-filter:blur(10px);
+    background:rgba(5,10,14,.82);border-bottom:1px solid var(--border)}
+  .nav{display:flex;align-items:center;gap:18px;height:60px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.3px}
+  .logo{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;
+    background:linear-gradient(140deg,#00e5a0,#0a8f68);color:#04130d;font-family:var(--mono);
+    font-weight:800;font-size:14px;box-shadow:0 0 22px rgba(0,229,160,.35)}
+  .brand small{color:var(--dim);font-weight:500;font-size:12px}
+  .nav-links{display:flex;gap:16px;margin-left:auto;align-items:center;font-size:14px}
+  .nav-links a{color:var(--dim)}
+  .nav-links a:hover{color:var(--text);text-decoration:none}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:9px;
+    border:1px solid var(--border2);background:var(--panel);color:var(--text);font-size:14px;
+    cursor:pointer;transition:.18s;white-space:nowrap}
+  .btn:hover{border-color:var(--accent);color:var(--accent);text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(140deg,var(--accent),#00a877);color:#04130d;
+    border-color:transparent;font-weight:700}
+  .btn-primary:hover{color:#04130d;filter:brightness(1.06)}
+  .btn-sm{padding:7px 12px;font-size:13px}
+
+  /* ---------- Hero ---------- */
+  .hero{padding:78px 0 54px;position:relative}
+  .badges{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+  .badge{font-size:12px;font-family:var(--mono);padding:4px 10px;border-radius:999px;
+    border:1px solid var(--border2);color:var(--dim);background:rgba(12,22,34,.8)}
+  .badge.ok{color:var(--accent);border-color:rgba(0,229,160,.35)}
+  .badge.info{color:var(--info);border-color:rgba(74,168,255,.32)}
+  .badge.warn{color:var(--warn);border-color:rgba(255,176,32,.32)}
+  h1{font-size:clamp(30px,4.6vw,52px);line-height:1.18;margin:0 0 14px;letter-spacing:-.5px}
+  h1 .grad{background:linear-gradient(100deg,var(--accent) 10%,#7ef0c6 55%,#4aa8ff);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:clamp(15px,1.6vw,18px);color:var(--dim);max-width:820px;margin:0 0 26px}
+  .lede b{color:var(--text);font-weight:600}
+  .cta{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:26px}
+  .compliance{display:flex;gap:12px;align-items:flex-start;padding:13px 16px;border-radius:11px;
+    border:1px solid rgba(255,176,32,.28);background:rgba(255,176,32,.07);max-width:860px}
+  .compliance .ico{color:var(--warn);font-size:16px;line-height:1.5}
+  .compliance p{margin:0;font-size:13px;color:#cbb187}
+
+  /* ---------- 统计条 ---------- */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:34px 0 8px}
+  .stat{border:1px solid var(--border);background:linear-gradient(180deg,var(--panel),rgba(12,22,34,.5));
+    border-radius:12px;padding:14px 16px}
+  .stat b{display:block;font-size:24px;font-family:var(--mono);color:var(--accent)}
+  .stat span{font-size:12.5px;color:var(--dim)}
+
+  /* ---------- 通用区块 ---------- */
+  section{padding:58px 0;border-top:1px solid rgba(22,40,58,.55)}
+  .sec-head{margin-bottom:26px}
+  h2{font-size:clamp(21px,2.6vw,29px);margin:0 0 8px;letter-spacing:-.2px}
+  .sec-head p{margin:0;color:var(--dim);max-width:820px;font-size:14.5px}
+  h3{font-size:16.5px;margin:0 0 6px}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:14px}
+  .card{border:1px solid var(--border);background:linear-gradient(180deg,var(--panel),rgba(8,17,26,.6));
+    border-radius:13px;padding:18px;transition:.18s;position:relative;overflow:hidden}
+  .card:hover{border-color:rgba(0,229,160,.42);transform:translateY(-2px)}
+  .card .k{font-family:var(--mono);font-size:11.5px;color:var(--accent);letter-spacing:.6px}
+  .card p{margin:6px 0 0;color:var(--dim);font-size:13.5px}
+  .card ul{margin:8px 0 0;padding-left:18px;color:var(--dim);font-size:13px}
+  .card li{margin:2px 0}
+  .ico-lg{font-size:19px;margin-bottom:8px;display:block}
+
+  /* ---------- 截图 ---------- */
+  .shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+  figure{margin:0;border:1px solid var(--border);border-radius:13px;overflow:hidden;background:var(--panel)}
+  figure img{display:block;width:100%;height:auto;border-bottom:1px solid var(--border)}
+  figcaption{padding:10px 14px;font-size:12.5px;color:var(--dim)}
+  figcaption b{color:var(--text);font-weight:600}
+
+  /* ---------- 闭环 / 架构 ---------- */
+  .flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+  .step{border:1px solid var(--border);border-radius:13px;padding:16px;background:var(--panel);
+    position:relative}
+  .step .n{position:absolute;top:-11px;left:14px;font-family:var(--mono);font-size:11px;padding:2px 8px;
+    border-radius:999px;background:var(--accent);color:#04130d;font-weight:700}
+  .step p{margin:8px 0 0;color:var(--dim);font-size:13.5px}
+
+  .arch{border:1px solid var(--border);border-radius:13px;background:var(--panel);padding:18px;overflow-x:auto}
+  .arch pre{margin:0;font-size:12.5px;line-height:1.7;color:#a8c6d6}
+
+  /* ---------- 代码块 ---------- */
+  pre.code{background:#04090d;border:1px solid var(--border);border-radius:12px;padding:16px 18px;
+    overflow-x:auto;font-size:13px;line-height:1.7;color:#b9d7e6;margin:0}
+  pre.code .c{color:var(--dim2)}
+  pre.code .g{color:var(--accent)}
+
+  /* ---------- 评测 ---------- */
+  .eval{border:1px solid var(--border);border-radius:13px;overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{padding:9px 13px;border-bottom:1px solid var(--border);text-align:left}
+  th{background:rgba(12,22,34,.9);color:var(--dim);font-weight:600;font-size:12.5px}
+  td.mono{font-family:var(--mono);font-size:12.5px}
+  tr:last-child td{border-bottom:none}
+  .ok{color:var(--accent)}
+  .mid{color:var(--info)}
+  .muted{color:var(--dim)}
+
+  /* ---------- 页脚 ---------- */
+  footer{border-top:1px solid var(--border);padding:34px 0 44px;color:var(--dim);font-size:13px}
+  .foot{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:center}
+  .foot-links{display:flex;flex-wrap:wrap;gap:14px}
+  @media (max-width:720px){
+    .nav-links{display:none}
+    .hero{padding:52px 0 40px}
+  }
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+
+<header>
+  <div class="wrap nav">
+    <div class="brand">
+      <span class="logo">PH</span>
+      <span>PivotHub<br /><small>链透中枢 · 多层内网渗透辅助工具</small></span>
+    </div>
+    <nav class="nav-links">
+      <a href="#features">功能</a>
+      <a href="#shots">界面</a>
+      <a href="#quickstart">快速开始</a>
+      <a href="#eval">真机评测</a>
+      <a href="ARCHITECTURE.md">架构</a>
+      <a class="btn btn-sm btn-primary" href="https://github.com/ProbiusOfficial/pivothub">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap hero">
+  <div class="badges">
+    <span class="badge ok">MIT License</span>
+    <span class="badge">Python 3.10+ · FastAPI + SQLite + WebSocket</span>
+    <span class="badge info">Vue 3 + ECharts（前端零构建 · 资源本地化）</span>
+    <span class="badge">273 tests passed</span>
+    <span class="badge warn">仅限 CTF / 授权靶场</span>
+  </div>
+
+  <h1>把多层内网渗透的<span class="grad">会话、隧道、资产与战果</span><br />收进一个本地面板</h1>
+
+  <p class="lede">
+    PivotHub（链透中枢）面向 <b>CTF 与授权靶场</b>的多层内网场景：统一会话抽象把 WebShell、反弹 Shell、SSH
+    与数据库连接放进同一套终端 / 文件 / 提权 / 凭据流程；<b>反弹 Shell 载荷库</b>、<b>终端固化</b>、
+    <b>代理编排</b>、<b>资产探测</b>、<b>Flag 墙</b>与<b>复盘导出</b>串成一条完整链路。
+    所有状态来自本地 SQLite，命令经会话层真实执行，<b>不伪造数据、不静默降级</b>。
+  </p>
+
+  <div class="cta">
+    <a class="btn btn-primary" href="#quickstart">快速开始</a>
+    <a class="btn" href="USAGE-REPORT-20260911.md">真实靶场评测报告（6 题 17/20 flag）</a>
+    <a class="btn" href="https://github.com/ProbiusOfficial/pivothub">查看源码 ↗</a>
+  </div>
+
+  <div class="compliance">
+    <span class="ico">⚠</span>
+    <p>合规声明：本工具仅用于 CTF 竞赛、授权靶场与教学演示，禁止对未授权的真实目标使用。
+       面板默认只监听 <span class="mono">127.0.0.1</span>，不内置任何针对真实目标的 exploit；
+       所有回连 / 隧道能力都需要操作者在自己的授权环境中显式开启。</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b>10</b><span>面板视图（会话 · 终端 · 文件 · 代理 · 数据库 · Flag …）</span></div>
+    <div class="stat"><b>17×10</b><span>反弹载荷：17 种语法 × 10 种编码</span></div>
+    <div class="stat"><b>3</b><span>内置隧道适配器：chisel / frp / Neo-reGeorg</span></div>
+    <div class="stat"><b>273</b><span>pytest 用例（含真机链路部署集成测试）</span></div>
+    <div class="stat"><b>17 / 20</b><span>真实靶场评测取 flag（6 道题）</span></div>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>核心能力</h2>
+      <p>不是「把命令拼好给你复制」的命令板，而是把每一步都落到真实会话上执行、并把结果写回本地库的操作台。</p>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <span class="ico-lg">🧩</span>
+        <div class="k">SESSION ABSTRACTION</div>
+        <h3>统一会话抽象</h3>
+        <p>WebShell（PHP/JSP/ASP/ASPX/命令回显端点）、反弹 Shell、SSH 四类会话共用
+           <span class="mono">exec / list_dir / read_file / write_file</span> 契约，终端、文件管理、提权、凭据扫描只写一遍。</p>
+      </div>
+      <div class="card">
+        <span class="ico-lg">🐚</span>
+        <div class="k">REVERSE SHELL</div>
+        <h3>反弹载荷库</h3>
+        <p>17 种语法 × 10 种编码 × 平台标注，按目标真实探测（<span class="mono">command -v</span>）标注可用性；
+           监听 → 载荷 → 回连<b>自动登记为会话</b>，延迟与来源端口一目了然。</p>
+        <ul><li>bash / nc / socat / python / perl / php / powershell …</li>
+        <li>base64、hex、URL、<span class="mono">$IFS</span> 变体与无空格形态</li></ul>
+      </div>
+      <div class="card">
+        <span class="ico-lg">🖥️</span>
+        <div class="k">TTY UPGRADE</div>
+        <h3>终端固化</h3>
+        <p>真实探测交互能力（<span class="mono">tty / TERM / stty size</span>）→ 按平台选技法（python PTY / script / socat …）
+           → PTY 内回读验证 → <span class="mono">stty sane</span> + 窗口尺寸同步收尾。形态徽标区分「伪终端 / 交互通道 / 已固化」。</p>
+      </div>
+      <div class="card">
+        <span class="ico-lg">🔀</span>
+        <div class="k">PROXY ORCHESTRATION</div>
+        <h3>代理编排台</h3>
+        <p>出网探测 → 隧道选型 → 一键部署并登记链路（多级中继自动推导）；链路健康看板对 socks 做真实探测，
+           失败按阶段如实报错（不伪造成功）。</p>
+      </div>
+      <div class="card">
+        <span class="ico-lg">📡</span>
+        <div class="k">RECON</div>
+        <h3>资产探测与扫描</h3>
+        <p>网卡 / 路由 / ARP 一键成表；内置 fscan 上传扫描（分片直传或 <b>HTTP 拉取</b>，自动回退），
+           结果解析后一键入库上拓扑；另有指纹、目录上下文发现与配置文件线索检索。</p>
+      </div>
+      <div class="card">
+        <span class="ico-lg">🗄️</span>
+        <div class="k">DATABASE</div>
+        <h3>数据库面板</h3>
+        <p>不是套壳 UI：经会话在目标机真实执行 <span class="mono">mysql</span> / <span class="mono">psql</span> 客户端，
+           库表结构自动探测、任意 SQL、耗时统计，中文无乱码。</p>
+      </div>
+      <div class="card">
+        <span class="ico-lg">🚩</span>
+        <div class="k">FLAGS &amp; TIMELINE</div>
+        <h3>Flag 墙与操作时间线</h3>
+        <p>按主机 / 阶段记录 Flag（阶段名项目级可配），完成度看板 + 一键复制提交；
+           资产 / 会话 / 代理 / 凭据 / Flag 全部自动入时间线，可加笔记。</p>
+      </div>
+      <div class="card">
+        <span class="ico-lg">📄</span>
+        <div class="k">WRITEUP EXPORT</div>
+        <h3>复盘导出</h3>
+        <p>概览 / 拓扑 / 跳板链 / 时间线 / 凭据 / Flag 一键导出 Markdown · HTML · JSON，
+           直接作为 writeup 骨架。</p>
+      </div>
+      <div class="card">
+        <span class="ico-lg">🧰</span>
+        <div class="k">EXTENSIBLE</div>
+        <h3>插件市场</h3>
+        <p>提权规则、终端固化技法、命令速查模板都是本地 <span class="mono">data/</span> 数据包，
+           支持启用 / 停用 / 卸载，扩展不必改代码。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="shots">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>界面一览</h2>
+      <p>截图取自空库首次启动播种的演示项目（虚构数据）。完整 17 张见
+         <a href="https://github.com/ProbiusOfficial/pivothub#2-界面预览">README</a>。</p>
+    </div>
+    <div class="shots">
+      <figure><img src="screenshots/01-阶段看板.jpg" alt="阶段看板与总览" loading="lazy" />
+        <figcaption><b>阶段看板</b> — 项目总览、层级进度与实时心跳</figcaption></figure>
+      <figure><img src="screenshots/09-代理编排台.jpg" alt="代理编排台" loading="lazy" />
+        <figcaption><b>代理编排台</b> — 出网探测 · 隧道选型 · 一键部署并登记</figcaption></figure>
+      <figure><img src="screenshots/06-资产探测.jpg" alt="资产探测" loading="lazy" />
+        <figcaption><b>资产探测</b> — 内网信息收集 + fscan 扫描入库</figcaption></figure>
+      <figure><img src="screenshots/10-数据库.jpg" alt="数据库面板" loading="lazy" />
+        <figcaption><b>数据库面板</b> — 经会话真实执行 mysql 客户端</figcaption></figure>
+      <figure><img src="screenshots/12-Flag收集墙.jpg" alt="Flag 收集墙" loading="lazy" />
+        <figcaption><b>Flag 收集墙</b> — 按主机 / 阶段登记与完成度</figcaption></figure>
+      <figure><img src="screenshots/16-复盘导出.jpg" alt="复盘导出" loading="lazy" />
+        <figcaption><b>复盘导出</b> — Markdown / HTML / JSON 一键成稿</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>一条完整链路</h2>
+      <p>从拿到第一个 Web 入口，到把内网资产、隧道、凭据与 flag 全部落库：每一步都有对应的视图，且都真实执行。</p>
+    </div>
+    <div class="flow">
+      <div class="step"><span class="n">1</span><h3>入口落马</h3>
+        <p>马生成器产出 PHP/JSP/ASPX 一句话马或命令回显端点；RCE / 上传 / 反序列化拿到的通道直接登记为会话。</p></div>
+      <div class="step"><span class="n">2</span><h3>交互升级</h3>
+        <p>终端固化把伪终端变成真 PTY；反弹 Shell 页开监听、下发载荷、回连自动登记，终端即用。</p></div>
+      <div class="step"><span class="n">3</span><h3>出网与隧道</h3>
+        <p>出网探测回答「能不能回连到我」，回连端口矩阵实测可用端口，编排台按结论部署 chisel / frp / Neo-reGeorg 并登记链路。</p></div>
+      <div class="step"><span class="n">4</span><h3>横向与战果</h3>
+        <p>资产探测扫下一层网段、凭据库记下可复用口令、提权助手给出建议、Flag 墙登记战果、复盘导出写报告。</p></div>
+    </div>
+
+    <div class="arch" style="margin-top:16px">
+<pre> 浏览器（Vue 3 + ECharts，零构建 · 本地 vendor）
+   │  REST /api/*                WebSocket /ws（心跳 · 扫描日志 · 终端原始流）
+   ▼
+ FastAPI 路由层   pivothub/api/*        项目 / 主机 / 会话 / 链路 / 凭据 / Flag / 时间线 / 导出 / 插件
+   │
+   ├── 服务层   pivothub/service/*      出网探测 · 终端固化 · 编排计划 · 线索检索 · 指纹 · 文件暂存 · 提权
+   ├── 会话层   pivothub/session/*      SessionBase 契约 + 驱动：http-shell / reverse / ssh / local
+   │                                     └ 反弹通道：哨兵同步 exec · 原始 PTY 流 · 断线即标记
+   ├── 适配层   pivothub/adapters/*     chisel / frp / Neo-reGeorg 部署 · 健康检查 · 销毁
+   └── 存储     SQLite（WAL）+ data/   项目 / 资产 / 会话 / 链路 / 凭据 / Flag / 时间线 · 命令与规则包</pre>
+    </div>
+  </div>
+</section>
+
+<section id="eval">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>真实靶场评测</h2>
+      <p>用内置浏览器以「真实使用者」视角黑盒操作 6 道授权靶题（三层内网 / DMZ / 域 / 容器逃逸），
+         共取回 <b class="ok">17 / 20</b> 个 flag。评测报告同时暴露了工具当时的短板（已在本轮修复：
+         反弹通道哨兵、出网探测假阳性、Flag 归属校验、终端固化门槛、扫描器传输）。</p>
+    </div>
+    <div class="eval">
+      <table>
+        <thead><tr><th>题目</th><th>入口</th><th>链路</th><th>flag</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">② 孤岛 · 封锁边界</td><td class="mono">:8083</td>
+              <td>ThinkPHP 5.0.23 RCE → WebShell → 出网实测 → OA 凭据 → 2375 未授权挂载读宿主</td>
+              <td class="ok">3 / 3</td></tr>
+          <tr><td class="mono">③ 深潜 · 三层内网</td><td class="mono">:8084</td>
+              <td>SSTI → 反弹会话 → Shiro-550（零外联验证）→ SUID 提权 → SSH 横向 → cron 投毒</td>
+              <td class="ok">3 / 3</td></tr>
+          <tr><td class="mono">④ 回声 · 遗忘的部署</td><td class="mono">:8085</td>
+              <td>Tomcat PUT 写马 → 一键提权 root → 数据库面板查 secret_vault</td>
+              <td class="ok">3 / 3</td></tr>
+          <tr><td class="mono">⑤ 终端 · 协作平台</td><td class="mono">:8086</td>
+              <td>Drupal 渲染数组注入可达但命令执行被禁（黑盒未突破）</td>
+              <td class="muted">0 / 3</td></tr>
+          <tr><td class="mono">⑥ 密语 · 全文检索</td><td class="mono">:8087</td>
+              <td>Log4Shell → 反弹会话 → Registry 镜像层取配置 → cron 提权</td>
+              <td class="ok">3 / 3</td></tr>
+          <tr><td class="mono">⑦ 幽冥 · 纵深要塞</td><td class="mono">:8088</td>
+              <td>OpenWire RCE → Nacos 建号拉配置 → SSH 备份机 → docker.sock 逃逸</td>
+              <td class="ok">4 / 4</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:13px;margin-top:12px">
+      报告中的靶场有效凭据与 flag 已打码（<span class="mono">flag{REDACTED}</span>）；
+      含实时 flag 的过程截图未随公开仓库发布。
+      报告全文：<a href="USAGE-REPORT-20260911.md">2026-09-11</a> ·
+      <a href="USAGE-REPORT-20260909.md">2026-09-09</a>。
+    </p>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>快速开始</h2>
+      <p>后端一体化托管前端，零构建、离线可用：Python 起一个进程，浏览器打开即用。</p>
+    </div>
+<pre class="code"><span class="c"># 1) 安装依赖（FastAPI / Uvicorn / SQLAlchemy / Pydantic）</span>
+pip install -r requirements.txt
+
+<span class="c"># 2) 启动（监听 127.0.0.1:8000，前端由后端静态托管）</span>
+python run.py            <span class="c"># 等价 python -m pivothub</span>
+
+<span class="c"># 3) 浏览器打开 → 首次进入会弹合规声明 → 空库自动播种演示项目</span>
+<span class="g">http://127.0.0.1:8000/</span>
+
+<span class="c"># 可选：跑测试（273 用例，含真机链路部署集成测试）</span>
+python -m pytest tests -q</pre>
+    <div class="cards" style="margin-top:16px">
+      <div class="card"><div class="k">LAB</div><h3>自带靶场</h3>
+        <p><span class="mono">scripts/lab/</span> 提供 Docker Compose 靶场（含 DMZ / 内网 / 域层），
+           可对本项目的会话、隧道、提权与扫描流程做端到端真机验证。</p></div>
+      <div class="card"><div class="k">FRONTEND ONLY</div><h3>只调界面</h3>
+        <p>前端零构建：直接用静态服务器托管仓库根目录即可预览 UI；后端不可用时界面会显式报错，不会用假数据兜底。</p></div>
+      <div class="card"><div class="k">PLUGINS</div><h3>扩展数据包</h3>
+        <p>提权规则 / 固化技法 / 命令速查模板都是 <span class="mono">data/</span> 下的 JSON，
+           照格式加文件即可出现在插件市场。</p></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <div>
+      <div class="brand" style="margin-bottom:6px"><span class="logo">PH</span>
+        <span>PivotHub · 链透中枢</span></div>
+      <div class="muted">MIT License · 仅用于 CTF / 授权靶场 / 教学演示</div>
+    </div>
+    <div class="foot-links">
+      <a href="https://github.com/ProbiusOfficial/pivothub">GitHub</a>
+      <a href="ARCHITECTURE.md">架构说明</a>
+      <a href="USAGE-REPORT-20260911.md">真机评测</a>
+      <a href="PROXY_GUIDE.md">代理编排指南</a>
+      <a href="https://github.com/ProbiusOfficial/pivothub/blob/main/LICENSE">License</a>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

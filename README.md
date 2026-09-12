@@ -1,5 +1,14 @@
 # PivotHub · 链透中枢 — 多层内网渗透辅助工具
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-00e5a0.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776ab.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI%20%2B%20SQLite-009688.svg)](https://fastapi.tiangolo.com/)
+[![Vue 3](https://img.shields.io/badge/Frontend-Vue%203%20%2B%20ECharts-42b883.svg)](assets/vendor/)
+[![tests](https://img.shields.io/badge/tests-273%20passed-00e5a0.svg)](#8-测试与验证)
+[![介绍页](https://img.shields.io/badge/%E4%BB%8B%E7%BB%8D%E9%A1%B5-GitHub%20Pages-4aa8ff.svg)](https://probiusofficial.github.io/pivothub/)
+
+> 🌐 **项目介绍页**：<https://probiusofficial.github.io/pivothub/>（能力总览 · 界面预览 · 真机评测速览）
+
 > 依据《多层内网渗透辅助工具 · 产品设计文档（PRD）v1.0》实现。
 > 技术栈：**Vue 3（本地化全局构建）+ ECharts 5（Graph 拓扑）+ 原生 CSS**，后端 **FastAPI + SQLite + WebSocket**。
 > 数据全部来自本地后端：`python -m pivothub` 启动后，前端经 REST + WebSocket 读写 SQLite；
