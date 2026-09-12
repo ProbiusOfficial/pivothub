@@ -4,9 +4,6 @@
 > 评测方式：**ZCode 内置浏览器**全程 GUI 黑盒操作（不读源码、不绕过面板、不直连 API/数据库）
 > 评测对象：PivotHub（http://127.0.0.1:8000）× 6 道真实靶场（10.8.0.6:8083–8088，共 20 个 flag）
 > 评测角色：真实使用者（按日常打靶流程使用，遇问题先记录再绕行）
-> **公开仓库说明**：本报告中的靶场有效凭据与 flag 值已打码（`flag{REDACTED}` / `口令****`）；
-> 过程证据截图（`docs/shots/*.png`）含靶场实时 flag 与凭据，**未随公开仓库发布**，本地留存。
-
 ---
 
 ## 1. 结论摘要
@@ -61,7 +58,7 @@
 
 **路径**：新建项目④ → 页面枚举（仅 index/list/about.jsp）→ 页面内 XHR 实测 `PUT /wtest.txt`→201（默认 servlet readonly=false 误配置）→ 「马生成器」JSP 一句话 → XHR `PUT /cmd.jsp/`（尾斜杠绕过，CVE-2017-12615 风格）→ `?cmd=` RCE（tomcat9）→ 登记主机 archive-web(L1) → Shell 管理「添加 Shell」（JSP 一句话 / 密码 cmd / none / 连通性测试 24ms）→ 保存连接。
 **一键提权（完整成功）**：⚡ → 采集 → 命中 `/etc/passwd 可写（90%）` → `echo 'ph::0:0:…' >> /etc/passwd` → `script -qc "su ph -c 'id'"` 验证 `uid=0(root)` → **✅ 建立提权上下文** → 终端直接 `cat /flag3.txt`。
-**内网与数据库**：终端 bash 并行扫 172.33.0.0/24 → 172.33.0.20:3306 → 面板终端 `grep getConnection` + WEB-INF properties 拿凭据 `archive/REDACTED********` → 「数据库 → ＋ 新建连接」（MySQL / 经会话 archive-web）→ 结构自动探测（archive 库 2 表 · 150ms）→ 点 `secret_vault` 预览 → flag2。
+**内网与数据库**：终端 bash 并行扫 172.33.0.0/24 → 172.33.0.20:3306 → 面板终端 `grep getConnection` + WEB-INF properties 拿凭据 `archive/REDACTED` → 「数据库 → ＋ 新建连接」（MySQL / 经会话 archive-web）→ 结构自动探测（archive 库 2 表 · 150ms）→ 点 `secret_vault` 预览 → flag2。
 **Flag 墙**：3 个全部登记（3/6）。
 **复盘导出**：Markdown 预览生成 → 全文保存 `docs/export-④回声-writeup.md`。
 
