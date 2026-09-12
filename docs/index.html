@@ -14,7 +14,7 @@
 <style>
   :root{
     --bg:#050a0e; --panel:#0c1622; --border:#16283a; --border2:#1f3a52;
-    --text:#d7e4ec; --dim:#8ba0ae; --dim2:#5f7683;
+    --text:#d7e4ec; --dim:#8ba0ae; --dim2:#7b93a1;
     --accent:#00e5a0; --warn:#ffb020; --info:#4aa8ff;
     --mono:"JetBrains Mono",Consolas,"SFMono-Regular",Menlo,monospace;
     --sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
@@ -51,8 +51,10 @@
   .nav-links{display:flex;gap:2px;margin-left:auto;align-items:center;font-size:13.5px;
     overflow-x:auto;scrollbar-width:none}
   .nav-links::-webkit-scrollbar{display:none}
-  .nav-links a{color:var(--dim);white-space:nowrap;padding:6px 9px;border-radius:8px;transition:.15s}
-  .nav-links a:hover{color:var(--text);background:rgba(255,255,255,.05);text-decoration:none}
+  /* ‼ 只给纯文本链接上色：`.nav-links a` 的特异性(0,1,1) 会盖掉 `.btn-primary`(0,1,0)，
+     曾导致 GitHub 按钮文字被涂成灰色（绿底灰字，像禁用态）。按钮样式必须走 :not(.btn)。 */
+  .nav-links a:not(.btn){color:var(--dim);white-space:nowrap;padding:6px 9px;border-radius:8px;transition:.15s}
+  .nav-links a:not(.btn):hover{color:var(--text);background:rgba(255,255,255,.05);text-decoration:none}
   .nav-links a.btn{padding:8px 14px;margin-left:6px}
   .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 14px;
     border-radius:8px;border:1px solid var(--border2);background:var(--panel);color:var(--text);
@@ -60,7 +62,9 @@
   .btn:hover{border-color:var(--accent);color:var(--accent);text-decoration:none}
   .btn-primary{background:linear-gradient(140deg,var(--accent),#00a877);color:#02120b;
     border-color:transparent;font-weight:700;box-shadow:0 2px 10px rgba(0,229,160,.22)}
-  .btn-primary:hover{color:#04130d;filter:brightness(1.06)}
+  .btn-primary:hover{color:#02120b;filter:brightness(1.05)}
+  .nav-links a.btn-primary{color:#02120b;background:linear-gradient(140deg,var(--accent),#00a877)}
+  .nav-links a.btn-primary:hover{color:#02120b}
   .btn-sm{padding:7px 12px;font-size:13px}
 
   .hero{padding:clamp(38px,6.5vw,68px) 0 clamp(24px,4vw,38px)}
