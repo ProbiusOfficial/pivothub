@@ -105,6 +105,37 @@ def test_patch_nonexistent_flag_404(client, sandbox_project):
     assert r.status_code == 404
 
 
+def test_add_flag_validates_host_ownership(client, sandbox_project):
+    """记录 Flag 必须校验 hostId 归属：空 / 不存在 / 跨项目一律 400（不写脏数据、不 500）。
+
+    回归背景：时间线事件的 host_id 有外键约束，陈旧或空的 hostId 会让整笔提交以
+    IntegrityError 冒泡成 500；跨项目主机则会静默写成脏数据（Flag 落在 A 项目却
+    指向 B 项目的主机）。
+    """
+    pid = sandbox_project
+    other = _new_project(client)                    # 另一个项目 + 它的主机
+    other_host = _new_host(client, other, "10.99.9.9")
+    mine = _new_host(client, pid, "10.99.1.12")
+
+    def add(hid, label):
+        r = client.post("/api/flags", json={"projectId": pid, "hostId": hid,
+                                           "stage": "L1 入口", "value": f"flag{{{label}}}"})
+        return r
+
+    # 空 hostId → 400（旧行为：500）
+    r = add("", "empty")
+    assert r.status_code == 400 and "所属主机" in r.json()["detail"], r.text
+    # 不存在 / 已删除主机 → 400（旧行为：500）
+    r = add("h-deleted-nope", "stale")
+    assert r.status_code == 400 and "不存在" in r.json()["detail"], r.text
+    # 跨项目主机 → 400（旧行为：200 静默脏写）
+    r = add(other_host, "cross")
+    assert r.status_code == 400 and "不属于项目" in r.json()["detail"], r.text
+    # 本项目的合法主机 → 200
+    r = add(mine, "ok")
+    assert r.status_code == 200, r.text
+
+
 def test_export_topo_renders_hosts_no_hardcoded_ip(client, project_id):
     """导出拓扑：不得出现硬编码 127.0.0.1；拓扑段应包含攻击端根与主机 IP。"""
     r = client.get("/api/export", params={"format": "md", "projectId": project_id})

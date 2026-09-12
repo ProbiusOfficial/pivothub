@@ -143,13 +143,19 @@ class ProbeReport:
     templates: list[dict] = field(default_factory=list)
     #: 回连端口矩阵模式下可达的端口
     reachablePorts: list[int] = field(default_factory=list)
+    #: 探测结论与目标侧防火墙留档不一致等需要人工复核的提示（空 = 无）
+    warning: str = ""
+    #: 从防火墙留档提取的放行项提示（可读到时才有）
+    rulesHint: str = ""
 
     def to_dict(self) -> dict:
         return {"hostId": self.hostId, "verdict": self.verdict, "recommend": self.recommend,
                 "alt": self.alt, "reason": self.reason,
                 "probes": [p.to_dict() for p in self.probes],
                 "templates": self.templates,
-                "reachablePorts": self.reachablePorts}
+                "reachablePorts": self.reachablePorts,
+                "warning": self.warning,
+                "rulesHint": self.rulesHint}
 
 
 def _cmd_icmp(host: str, platform: str) -> str:
@@ -175,8 +181,12 @@ def _cmd_http(url: str, platform: str) -> str:
 
 def _cmd_tcp(host: str, port: int, platform: str) -> str:
     if platform == "windows":
+        # ConnectAsync + Wait(5000)：同步 Connect() 在目标不可达时要等 TCP 栈超时（~21s），
+        # 出网探测/HTTP 拉取前置检查会被拖慢；这里给明确的 5s 上界。
         return ('powershell -NoP -NonI -Command "try{$c=New-Object Net.Sockets.TcpClient;'
-                f'$c.Connect(\\"{host}\\",{port}); Write-Output \\"TCP OPEN\\"; $c.Close()}}'
+                f'$t=$c.ConnectAsync(\\"{host}\\",{port});'
+                'if($t.Wait(5000) -and $c.Connected){Write-Output \\"TCP OPEN\\"}'
+                'else{Write-Output \\"TCP CLOSED\\"};$c.Close()}'
                 'catch{Write-Output \\"TCP CLOSED\\"}"')
     return (f"(timeout 5 bash -c 'exec 3<>/dev/tcp/{host}/{port} && echo TCP OPEN' 2>&1 "
             f"|| (echo > /dev/tcp/{host}/{port} 2>/dev/null && echo TCP OPEN) "
@@ -207,7 +217,14 @@ def _parse(key: str, output: str) -> tuple[bool, str]:
     if key == "HTTP":
         m = re.search(r"HTTP\s+(\d{3})", text)
         if m:
-            return int(m.group(1)) < 500, text[:160]
+            code = int(m.group(1))
+            # ⚠ 000 = curl 的「没有拿到任何 HTTP 响应」（连接被 DROP / 超时 / DNS 失败）。
+            # 旧实现用 `code < 500` 判定，把 000 当成了「HTTP 可达」→ 出网探测假阳性
+            # （目标 TCP 全封却推荐 HTTP 隧道）。000 必须判失败。
+            if code == 0:
+                return False, _first_line(text)
+            # 1xx~5xx 都算可达：服务端确实回了 HTTP 响应（502/500 也证明 HTTP 通路存在）
+            return True, text[:160]
         # 无状态行：必须明确无失败标记才算成功（修复：原先"输出里没有 err 就算 200"，
         # 导致 curl/wget 被防火墙 DROP 时的 "(28) Connection timed out" 被误判为 HTTP 可达）
         if any(mark in low for mark in _HTTP_FAIL_MARKS):
@@ -233,12 +250,12 @@ def _compact_html(text: str, limit: int = 120) -> str:
 
 
 def build_probes(platform: str, opts: dict) -> list[ProbeItem]:
-    o = {**DEFAULTS, **(opts or {})}
+    t = _resolve_targets(opts)
     return [
-        ProbeItem(key="ICMP", expect="fail", cmd=_cmd_icmp(str(o["icmpHost"]), platform)),
-        ProbeItem(key="DNS", expect="ok", cmd=_cmd_dns(str(o["dnsName"]), platform)),
-        ProbeItem(key="HTTP", expect="ok", cmd=_cmd_http(str(o["httpUrl"]), platform)),
-        ProbeItem(key="TCP", expect="ok", cmd=_cmd_tcp(str(o["tcpHost"]), int(o["tcpPort"]), platform)),
+        ProbeItem(key="ICMP", expect="fail", cmd=_cmd_icmp(str(t["icmpHost"]), platform)),
+        ProbeItem(key="DNS", expect="ok", cmd=_cmd_dns(str(t["dnsName"]), platform)),
+        ProbeItem(key="HTTP", expect="ok", cmd=_cmd_http(str(t["httpUrl"]), platform)),
+        ProbeItem(key="TCP", expect="ok", cmd=_cmd_tcp(str(t["tcpHost"]), int(t["tcpPort"]), platform)),
     ]
 
 
@@ -308,21 +325,118 @@ def _rules_hint(text: str) -> str:
             + "。请把隧道服务端挪到上述端口，或改用对应协议的隧道（如仅 UDP/53 → DNS 隧道）。")
 
 
-def build_probes(platform: str, opts: dict) -> list[ProbeItem]:
+def _rules_policy(text: str) -> dict:
+    """解析防火墙留档 → {readable, policyDrop, ports:set, icmp}。
+
+    ports 形如 ``{"tcp/443", "udp/53"}``（留档显式放行的项）；policyDrop 表示留档
+    以 DROP 兜底。用于与探测结论做一致性检查，避免输出「自信的错误结论」。
+    """
+    out: dict = {"readable": False, "policyDrop": False, "ports": set(), "icmp": False}
+    if not text or "PIVOTHUB_NO_RULES" in text:
+        return out
+    out["readable"] = True
+    for line in text.splitlines():
+        line = line.strip()
+        if re.search(r"^-P\s+\S+\s+DROP", line) or "policy DROP" in line \
+                or re.match(r"^:\s*\S+\s+DROP\b", line):
+            out["policyDrop"] = True
+        if not line.startswith("-A ") or line.endswith("DROP"):
+            continue
+        if "-j ACCEPT" not in line and "-j RETURN" not in line:
+            continue
+        if "-p icmp" in line:
+            out["icmp"] = True
+        m = re.search(r"--dport[s]?\s+([0-9,:]+)", line)
+        if m:
+            proto = "udp" if "-p udp" in line else "tcp"
+            for port in m.group(1).replace(":", ",").split(","):
+                if port.strip().isdigit():
+                    out["ports"].add(f"{proto}/{port.strip()}")
+    return out
+
+
+def _http_port(url: str, default: int = 80) -> int:
+    try:
+        from urllib.parse import urlsplit
+
+        return int(urlsplit(str(url)).port or (443 if str(url).lower().startswith("https") else default))
+    except Exception:  # pragma: no cover - 非法 URL 不影响主流程
+        return default
+
+
+def _rules_conflict(ok_map: dict, tcp_port: int, http_port: int, policy: dict) -> str:
+    """探测结论 vs 防火墙留档：矛盾时明确要求人工复核（不悄悄下结论）。"""
+    if not policy.get("readable") or not policy.get("policyDrop"):
+        return ""
+    allowed = policy.get("ports") or set()
+    hits: list[str] = []
+    if ok_map.get("TCP") and tcp_port and f"tcp/{tcp_port}" not in allowed:
+        hits.append(f"TCP {tcp_port} 探测可达，但留档未放行该端口")
+    if ok_map.get("HTTP") and http_port and f"tcp/{http_port}" not in allowed:
+        hits.append(f"HTTP {http_port} 探测可达，但留档未放行该端口")
+    if ok_map.get("ICMP") and not policy.get("icmp"):
+        hits.append("ICMP 探测可达，但留档未放行 ICMP")
+    if not hits:
+        return ""
+    return ("⚠ 探测结论与目标侧防火墙留档不一致（" + "；".join(hits)
+            + "）。留档可能是过时快照，也可能是中间设备放行了探针——请人工复核，"
+              "并以真实回连实验（攻击机开监听后由目标侧主动连接）作为最终判据。")
+
+
+def _resolve_targets(opts: dict, fallback_port: int = 0) -> dict:
+    """探针目标解析：给了 attackIp 就打攻击机（操作者真正关心「能否回连到我」）。
+
+    ``fallback_port`` 由调用方给出「攻击机上确定在监听」的端口（面板自己的暂存 HTTP
+    服务），避免拿一个没人监听的默认端口（443）得出「TCP 全封」的假结论。
+    """
     o = {**DEFAULTS, **(opts or {})}
+    attack_ip = str(o.get("attackIp") or "").strip()
+    attack_port = int(o.get("attackPort") or 0) or int(fallback_port or 0)
+    http_url = str(o["httpUrl"])
+    if attack_ip and attack_port:
+        http_url = f"http://{attack_ip}:{attack_port}/"
+    return {
+        "attackIp": attack_ip,
+        "icmpHost": attack_ip or str(o["icmpHost"]),
+        "dnsName": str(o["dnsName"]),
+        "httpUrl": http_url,
+        "tcpHost": attack_ip or str(o["tcpHost"]),
+        "tcpPort": attack_port or int(o["tcpPort"]),
+    }
+
+
+def build_probes(platform: str, opts: dict, fallback_port: int = 0) -> list[ProbeItem]:
+    t = _resolve_targets(opts, fallback_port)
     return [
-        ProbeItem(key="ICMP", expect="fail", cmd=_cmd_icmp(str(o["icmpHost"]), platform)),
-        ProbeItem(key="DNS", expect="ok", cmd=_cmd_dns(str(o["dnsName"]), platform)),
-        ProbeItem(key="HTTP", expect="ok", cmd=_cmd_http(str(o["httpUrl"]), platform)),
-        ProbeItem(key="TCP", expect="ok", cmd=_cmd_tcp(str(o["tcpHost"]), int(o["tcpPort"]), platform)),
+        ProbeItem(key="ICMP", expect="fail", cmd=_cmd_icmp(str(t["icmpHost"]), platform)),
+        ProbeItem(key="DNS", expect="ok", cmd=_cmd_dns(str(t["dnsName"]), platform)),
+        ProbeItem(key="HTTP", expect="ok", cmd=_cmd_http(str(t["httpUrl"]), platform)),
+        ProbeItem(key="TCP", expect="ok", cmd=_cmd_tcp(str(t["tcpHost"]), int(t["tcpPort"]), platform)),
     ]
+
+
+def _own_listen_port() -> int:
+    """面板自身在监听、且目标可访问的端口：文件暂存 HTTP 服务（0.0.0.0:随机端口）。
+
+    用它当「攻击机侧回连目标」比默认 443 靠谱得多：该端口一定在监听，探测结论
+    回答的就是真实回连路径；顺带覆盖「本机 IP 配置是否正确」。
+    """
+    try:
+        from .filestage import STAGE
+
+        return int(STAGE.bound_port or STAGE.start() or 0)
+    except Exception:  # pragma: no cover - 起不来就退回内置基线端口
+        return 0
 
 
 def run_probes(session: SessionBase, host_id: str = "", opts: dict | None = None,
                per_timeout: float = 12.0) -> ProbeReport:
-    """真实执行四类探针并给出结论（失败如实记录证据）。"""
+    """真实执行四类探针并给出结论（失败如实记录证据 + 防火墙留档交叉校验）。"""
     platform = getattr(session, "platform", "linux")
-    items = build_probes(platform, opts or {})
+    o = {**DEFAULTS, **(opts or {})}
+    fallback_port = _own_listen_port() if str(o.get("attackIp") or "").strip() else 0
+    targets = _resolve_targets(o, fallback_port)
+    items = build_probes(platform, o, fallback_port)
     for p in items:
         p.state = "run"
         res = session.exec(p.cmd, timeout=per_timeout)
@@ -333,20 +447,27 @@ def run_probes(session: SessionBase, host_id: str = "", opts: dict | None = None
         p.progress = 100
         p.evidence = _compact_html(evidence) or (res.error or "无回显")
     verdict, recommend, alt, reason = conclude(items)
-    # 全失败或仅非常规通道时，再读一眼目标侧防火墙留档，把"该挪到哪个端口"讲清楚
     ok_map = {p.key: (p.state == "ok") for p in items}
-    if not ok_map.get("TCP"):
-        try:
-            rr = session.exec(_rules_cmd(platform), timeout=per_timeout)
-            hint = _rules_hint((rr.output or "") + "\n" + (rr.error or ""))
-            if hint:
-                reason = reason + " " + hint
-        except Exception:  # pragma: no cover - 留档不可读不影响主结论
-            pass
+
+    # 目标侧防火墙留档：既用来讲清「该把服务端挪到哪」，也用来交叉校验探测结论
+    rules_text = ""
+    try:
+        rr = session.exec(_rules_cmd(platform), timeout=per_timeout)
+        rules_text = (rr.output or "") + "\n" + (rr.error or "")
+    except Exception:  # pragma: no cover - 留档不可读不影响主结论
+        rules_text = ""
+    hint = _rules_hint(rules_text)
+    if hint and not ok_map.get("TCP"):
+        reason = reason + " " + hint
+    warning = _rules_conflict(ok_map, int(targets["tcpPort"]), _http_port(targets["httpUrl"]),
+                             _rules_policy(rules_text))
+    if targets["attackIp"]:
+        reason = f"（探针目标：攻击机 {targets['attackIp']}，非公网）" + reason
     templates = templates_for(ok_icmp=ok_map.get("ICMP", False), ok_dns=ok_map.get("DNS", False),
                               ok_tcp=ok_map.get("TCP", False), ok_http=ok_map.get("HTTP", False))
     return ProbeReport(hostId=host_id, verdict=verdict, recommend=recommend, alt=alt,
-                       reason=reason, probes=items, templates=templates)
+                       reason=reason, probes=items, templates=templates,
+                       warning=warning, rulesHint=hint)
 
 
 def run_callback_matrix(session: SessionBase, attack_ip: str, host_id: str = "",

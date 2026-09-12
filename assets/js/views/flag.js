@@ -3,7 +3,7 @@
    ============================================================ */
 (function (global) {
   'use strict';
-  const { reactive, computed } = Vue;
+  const { reactive, computed, watch } = Vue;
   const S = PivotStore;
 
   global.Components['flag-view'] = {
@@ -14,8 +14,19 @@
       const total = S.stats.value.flagsTotal;
 
       const form = reactive({
-        hostId: S.state.hosts[1] ? S.state.hosts[1].id : '',
+        hostId: S.state.hosts[1] ? S.state.hosts[1].id : (S.state.hosts[0] ? S.state.hosts[0].id : ''),
         stage: 'L1 入口', value: '', submitted: false,
+      });
+
+      /* 切项目后表单默认主机必须跟着换项目重置：旧实现只在组件初始化时取一次
+         hosts[1]，切项目后提交的是上个项目（甚至已删除）的 hostId —— 空/陈旧
+         hostId 会因时间线外键约束报 500，跨项目主机则会写成脏数据。 */
+      watch(() => S.state.projectId, () => {
+        const hosts = S.state.hosts || [];
+        form.hostId = hosts[1] ? hosts[1].id : (hosts[0] ? hosts[0].id : '');
+        form.value = '';
+        form.submitted = false;
+        form.stage = (S.state.stageNames && S.state.stageNames[0]) || 'L1 入口';
       });
 
       const flags = computed(() => S.state.flags);
@@ -35,6 +46,7 @@
       function openAdd() { ui.modal = 'flag-add'; }
       function save() {
         if (!form.value.trim()) { S.toast('请填写 Flag 内容', 'err'); return; }
+        if (!form.hostId) { S.toast('请选择所属主机（记录 Flag 必须绑定当前项目的一台主机）', 'err'); return; }
         S.addFlag(form);
         ui.modal = null;
         form.value = ''; form.submitted = false;
@@ -96,9 +108,12 @@
         S.saveStages([], (ok) => { stageEdit.busy = false; if (ok) ui.modal = null; });
       }
 
+      /* 阶段名随项目变化：必须是 computed，否则切项目后下拉仍是上个项目的阶段 */
+      const stageNames = computed(() => S.state.stageNames || []);
+
       return {
         ui, form, flags, total, submitted, ringBg, stages,
-        hosts: S.state.hosts, stageNames: S.state.stageNames || [],
+        hosts: S.state.hosts, stageNames,
         ipOf: S.ipOf, hostnameOf: S.hostnameOf, copy: S.copy, openAdd, save,
         toggleSubmitted, edit, openEdit, saveEdit, del,
         stageEdit, openStages, addStage, removeStage, saveStages, resetStages,

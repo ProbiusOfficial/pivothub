@@ -154,6 +154,8 @@
         toggleTimer: S.toggleTimer,
         createProject: S.createProject,
         deleteProject: S.deleteProject,
+        projectForm: S.projectForm,
+        submitProjectAdd: S.submitProjectAdd,
         gcfg, gcfgSegments, openGlobalSettings, loadIfaces, onIfaceSelect, onSegmentSelect,
         detectLocalIp, saveGlobalSettings,
         fileEdit: S.fileEdit, saveFileEdit: S.saveFileEdit, closeFileEdit: S.closeFileEdit,

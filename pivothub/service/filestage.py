@@ -151,6 +151,25 @@ def _platform_of(sess: SessionBase) -> str:
     return "windows" if getattr(sess, "platform", "linux") == "windows" else "linux"
 
 
+def stage_host(db, project_id: str, shell, sess) -> str:
+    """目标机下载时应访问的攻击机地址。
+
+    优先项目里显式配置的「攻击机网络」；未配置且目标本身是回环地址（本机联调靶）
+    时用 127.0.0.1；其余回落到基线默认值。文件管理与资产探测（扫描器上传）共用。
+    """
+    from ..db import get_attack
+    from ..models import Project
+
+    project = db.get(Project, project_id)
+    cfg = (project.settings or {}).get("attack") if project is not None else None
+    if cfg and cfg.get("ip"):
+        return str(cfg["ip"])
+    url = (getattr(shell, "url", "") or "").lower()
+    if "127.0.0.1" in url or "localhost" in url:
+        return "127.0.0.1"
+    return str((get_attack(db, project_id) or {}).get("ip") or "127.0.0.1")
+
+
 def detect_tools(sess: SessionBase) -> list[str]:
     """目标侧真实探测可用下载工具（按偏好顺序返回，可能为空）。"""
     platform = _platform_of(sess)
@@ -173,6 +192,25 @@ def _file_size(sess: SessionBase, path: str, platform: str, timeout: float = 30.
     return int(nums[-1]) if nums else None
 
 
+def can_reach(sess: SessionBase, host: str, port: int, timeout: float = 12.0) -> bool:
+    """目标机能否 TCP 连到攻击机指定端口（HTTP 拉取的前置检查）。
+
+    没有这道检查时，目标不通攻击机会让 curl/certutil/powershell/bitsadmin 逐个
+    长超时（certutil / Invoke-WebRequest 本身没有超时参数）——实测能挂几分钟。
+    """
+    from .probe import _cmd_tcp, _parse
+
+    if not host or not port:
+        return False
+    platform = "windows" if getattr(sess, "platform", "linux") == "windows" else "linux"
+    try:
+        res = sess.exec(_cmd_tcp(str(host), int(port), platform), timeout=timeout)
+    except (SessionError, OSError):
+        return False
+    ok, _ = _parse("TCP", (res.output or "") + "\n" + (res.error or ""))
+    return bool(ok)
+
+
 @dataclass
 class PullResult:
     ok: bool = False
@@ -191,15 +229,26 @@ class PullResult:
 
 def pull_file(sess: SessionBase, url: str, target_path: str, expected: int, *,
               platform: str | None = None, tools: list[str] | None = None,
-              timeout: float = 300.0) -> PullResult:
-    """在目标侧依次尝试下载工具，并用真实文件大小校验；全失败如实返回。"""
+              timeout: float = 300.0, max_tools: int = 0,
+              per_timeout: float | None = None) -> PullResult:
+    """在目标侧依次尝试下载工具，并用真实文件大小校验；全失败如实返回。
+
+    - ``timeout``：单次下载在**目标侧**的允许耗时（命令自身的 --max-time 由此推导）；
+    - ``per_timeout``：会话层等待上限，默认取 timeout（长下载不会被过早打断）；
+    - ``max_tools``：最多尝试几个工具（0=全部）。**必须给非零值**时要清楚：没有
+      超时参数的工具（certutil / Invoke-WebRequest / bitsadmin）在目标不通时会
+      各自挂很久，自动流程应把尝试次数压到 1–2 个。
+    """
     platform = platform or _platform_of(sess)
     order = [t for t in (tools if tools is not None else list(TOOLS_BY_PLATFORM[platform]))
              if t in TOOLS_BY_PLATFORM.get(platform, ())]
+    if max_tools > 0:
+        order = order[:max_tools]
     result = PullResult(expected=expected, url=url)
     if not order:
         result.reason = "目标机未检测到可用的下载工具（curl/wget/python3 等）"
         return result
+    wait = float(per_timeout if per_timeout is not None else timeout)
 
     for tool in order:
         try:
@@ -209,7 +258,7 @@ def pull_file(sess: SessionBase, url: str, target_path: str, expected: int, *,
             continue
         result.log.append(f"[{tool}] {cmd}")
         try:
-            res = sess.exec(cmd, timeout=timeout)
+            res = sess.exec(cmd, timeout=wait)
         except SessionError as e:
             result.log.append(f"[{tool}] 执行失败：{e}")
             continue

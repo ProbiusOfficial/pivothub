@@ -13,8 +13,15 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
-def _echo_client(port: int, ready: threading.Event) -> None:
-    """模拟靶机回连：原样回显收到的数据（PTY 行为），哨兵标记因此出现在回显里。"""
+def _echo_client(port: int, ready: threading.Event,
+                 output: bytes = b"file-a.txt\nfile-b.txt\n") -> None:
+    """模拟靶机回连（PTY 行为）：逐行**先原样回显输入**，再执行。
+
+    真实 PTY（socat/script/pty.spawn，或面板「获取 PTY」升级后的通道）会回显
+    ``echo PH_xxx`` 这一行——哨兵判定必须靠「独占一行的 marker」，不能靠子串包含，
+    否则命令尚未执行就会命中（历史表现：扫描 0 台主机 / cat 无输出）。
+    非 echo 命令统一回 ``output``，模拟真实命令输出。
+    """
     conn = None
     for _ in range(50):
         try:
@@ -27,6 +34,7 @@ def _echo_client(port: int, ready: threading.Event) -> None:
         return
     try:
         conn.settimeout(0.5)
+        buf = b""
         while True:
             try:
                 data = conn.recv(4096)
@@ -36,7 +44,17 @@ def _echo_client(port: int, ready: threading.Event) -> None:
                 break
             if not data:
                 break
-            conn.sendall(data)
+            conn.sendall(data)              # ① PTY 回显（含 echo PH_x 这一行）
+            buf += data
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                text = line.decode("utf-8", "replace").strip()
+                if not text:
+                    continue
+                if text.startswith("echo "):
+                    conn.sendall((text[5:] + "\n").encode())   # ② 执行哨兵
+                else:
+                    conn.sendall(output)
     finally:
         conn.close()
 
@@ -256,9 +274,35 @@ def _register_reverse(client, project_id: str, listener_id: str) -> tuple[str, o
     return reg["shell"]["id"], REVERSE_CHANNELS[reg["shell"]["id"]]
 
 
+def test_reverse_pty_echo_channel_exec_gets_real_output(client, sandbox_project):
+    """PTY 回显型通道：exec / exec_stream 必须拿到真实输出（哨兵不能被回显行提前触发）。
+
+    回归背景：远端为 PTY 时会把 `echo PH_xxx` 原样回显，子串匹配哨兵会立即命中 →
+    exec 返回「ok=True + 空输出」（历史表现：fscan 118ms 发现 0 台 / cat 无回显）。
+    """
+    port = _free_port()
+    lid = _open_listener(client, port)
+    ready = threading.Event()
+    threading.Thread(target=_echo_client,
+                     args=(port, ready, b"flag{from-pty-channel}\n"), daemon=True).start()
+    assert ready.wait(3)
+    assert _wait_connected(client, lid), "回连未建立"
+    _sid, ch = _register_reverse(client, sandbox_project, lid)
+
+    res = ch.exec("cat /tmp/hdr2", timeout=5)
+    assert res.ok is True, res
+    assert res.output == "flag{from-pty-channel}", res.output
+    assert "PH_" not in res.output                  # 哨兵回显行不得混进输出
+
+    lines: list[str] = []
+    sres = ch.exec_stream("./fscan -h 10.0.0.0/24", lines.append, timeout=5)
+    assert sres.ok is True, sres
+    assert lines == ["flag{from-pty-channel}"], lines
+    client.delete("/api/shells/reverse/listeners")
+
+
 class _HangPTY:
     """假 PTY 靶机：命令卡住时不再处理后续输入（模拟 ping 占住 shell），Ctrl+C 可恢复。"""
-
     def __init__(self, conn: socket.socket) -> None:
         self.conn = conn
         self.buf = b""

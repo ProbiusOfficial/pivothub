@@ -4,6 +4,8 @@
 - **评测方式**：ZCode 内置浏览器（Electron/Chromium 146）全程 GUI 黑盒操作，操作者视角为「真实使用者」而非开发者
 - **靶场**：6 道授权靶题（②孤岛 :8083 / ③深潜 :8084 / ④回声 :8085 / ⑤终端 :8086 / ⑥密语 :8087 / ⑦幽冥 :8088），共 20 个 flag
 - **攻击机**：10.8.0.14（全局设置「检测本机 IP」自动识别，OpenVPN TAP 网卡）
+> **公开仓库说明**：本报告中的靶场有效凭据与 flag 值已打码（`flag{REDACTED}` / `口令****`）；
+> 过程证据截图（`docs/screenshots/0X-*.png`）含靶场实时 flag，**未随公开仓库发布**，本地留存。
 
 ---
 
@@ -80,7 +82,7 @@
 1. `PUT /poc.jsp/`（尾部斜杠，CVE-2017-12617 变体）返回 **201**，写入命令回显 JSP（tomcat9）。
 2. 登记「Java 命令回显端点」类型会话，连通性 122ms；虚拟终端侦察：archive-web / 172.32.0.10 + 172.33.0.10。
 3. **一键提权**：命中「/etc/passwd 可写（90%）」→ 自动 `echo 'ph::0:0:...' >> /etc/passwd` → `script -qc "su ph -c 'id'"` → `uid=0(root)`，徽章变「已提权 ph」，后续命令带 root 上下文 → 读 `/flag3.txt`（600 root）。
-4. 「配置文件线索检索」22 个命中但集中在 /etc 系统文件（未覆盖 WEB-INF）；手动 `find` 定位 `WEB-INF/db.properties`：`archive / REDACTED****`。
+4. 「配置文件线索检索」22 个命中但集中在 /etc 系统文件（未覆盖 WEB-INF）；手动 `find` 定位 `WEB-INF/db.properties`：`archive / REDACTED********`。
 5. **数据库面板**：新建连接（MySQL 172.33.0.20:3306，经 poc.jsp 会话执行）→「库/表列表」自动探测出 `archive.files / archive.secret_vault` → `SELECT * FROM archive.secret_vault` 中文正常、flag 直接可见。
 6. 顺带实测「应用指纹探测」对本机 8080/管理台路径的探测输出。
 
@@ -94,7 +96,7 @@
 1. Drupalgeddon2 判定矩阵：`#post_render[]=print_r` + 标记串，`element_parents=account/mail`（**不带 `#value`**）时标记串出现在响应 → 渲染数组注入生效；但 `system/exec/passthru` 全部无输出、带外 curl 无命中、阻塞式 `/bin/sleep 12` 无时延 → **命令执行函数疑似被 disable_functions 禁用**。
 2. `#markup` 中 PHP 代码被 HTML 转义输出；`#value/#lazy_builder` 等向量与 MSF/a2u 原版组合均无效 → 匿名 RCE 主路径被堵。
 3. 按「Drupal 后门文件」提示穷举约 120 个候选路径/扩展（含 phtml/php5、/sites/default/files/、/vendor/phpunit eval-stdin.php[403 被服务器规则挡]、/themes、/misc）未命中。
-4. **第二轮迭代（凭据复用 / REST 向量）**：发现 `/user/login?_format=json` REST 登录端点可用（返回结构化错误）；批量尝试跨题凭据复用（admin/admin、admin/REDACTED、admin/REDACTED****、admin/REDACTED、admin/REDACTED 等）全部 400「unrecognized username or password」；6 次失败后触发 Drupal flood control（403「Too many failed login attempts from your IP」）。**第三轮（flood 过期后走表单通道）**：带 form_build_id 的表单登录再复用 7 组跨题凭据（含 REDACTED / REDACTED**** / REDACTED / REDACTED）全部 200 且无跳转 = 均未命中；`hal_json` REST 向量因站点无 node 且 rest/hal 未路由（/node/1 404）不可达。
+4. **第二轮迭代（凭据复用 / REST 向量）**：发现 `/user/login?_format=json` REST 登录端点可用（返回结构化错误）；批量尝试跨题凭据复用（admin/admin、admin/REDACTED、admin/REDACTED********、admin/REDACTED、admin/REDACTED 等）全部 400「unrecognized username or password」；6 次失败后触发 Drupal flood control（403「Too many failed login attempts from your IP」）。**第三轮（flood 过期后走表单通道）**：带 form_build_id 的表单登录再复用 7 组跨题凭据（含 REDACTED / REDACTED******** / REDACTED / REDACTED）全部 200 且无跳转 = 均未命中；`hal_json` REST 向量因站点无 node 且 rest/hal 未路由（/node/1 404）不可达。
 5. **第三轮定性（时序法实锤）**：`system('sleep 15')` 注入响应仅 218ms（阻塞式验证无时延）→ 命令执行函数族（system/exec/passthru）确被 disable_functions 禁用，而 PHP 回调本身有效（print_r 标记回显成功）——即「渲染数组注入可达、shell 全禁」的精确状态。另发现站点对任意 `*.php.bak` 模式返回 403（对照其他不存在路径为 200/404），疑似针对后门备份文件的防护规则，间接佐证「后门文件」存在于某 .bak 命名下但规则内不可达。
 6. **第四轮（版本指纹 + 大规模后门扫描 + flood 过期重试）**：
    - 版本指纹：`/core/modules/jsonapi|ckeditor5|olivero|claro` 均 404（模块不存在），`media/datetime_range` 存在 → **Drupal 8.4–8.6**（早于 8.7，无 jsonapi 向量）；
@@ -302,7 +304,7 @@
 
 ## 附：本次产物
 
-- 截图证据：`docs/screenshots/01~07-*.png`（7 张关键过程图）
+- 截图证据：`docs/screenshots/01~07-*.png`（7 张关键过程图，含靶场实时 flag，未随公开仓库发布）
 - 复盘导出样例：`docs/export/writeup-②孤岛-评测.md`（②项目 Markdown 导出原文）
 - 本报告：`docs/USAGE-REPORT-20260911.md`
 

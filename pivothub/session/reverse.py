@@ -34,6 +34,58 @@ _ANSI_RE = re.compile(
 )
 
 
+def _line_value(line: str) -> str:
+    """去掉行尾换行与 PTY 的 ``\\r`` 回车覆盖前缀，得到该行「当前显示的内容」。"""
+    return line.rstrip("\r\n").rsplit("\r", 1)[-1].strip()
+
+
+def _is_marker_line(line: str, marker: str) -> bool:
+    """哨兵命中判定：**行尾**是 marker，且该行不是哨兵命令自身的回显。
+
+    ⚠ 不能用子串包含：PTY 会把 ``echo PH_xxx`` 整行原样回显，子串匹配会在命令
+    尚未执行时立即命中（历史表现：扫描 0 台主机 / cat 无输出）。
+    ⚠ 也不能要求「整行恰好等于 marker」：shell 的提示符没有换行结尾，
+    ``<prompt>$ PH_xxx`` 会粘在提示符后面——判据是「行尾是 marker 但行尾不是
+    ``echo <marker>``」，两者一次覆盖。
+    """
+    v = _line_value(line)
+    return v.endswith(marker) and not v.endswith(f"echo {marker}")
+
+
+def marker_index(chunk: str, marker: str) -> int:
+    """返回命中哨兵那一行的起始下标；没有返回 -1。"""
+    pos = 0
+    for line in chunk.split("\n"):
+        if _is_marker_line(line, marker):
+            return pos
+        pos += len(line) + 1
+    return -1
+
+
+def marker_line(line: str, marker: str) -> bool:
+    """单行哨兵判定（exec_stream 按行消费时使用）。"""
+    return _is_marker_line(line, marker)
+
+
+def _is_marker_echo(line: str, marker: str) -> bool:
+    """是否为「哨兵命令自身的回显行」（``echo PH_x``，可能带提示符前缀）。
+
+    PTY 通道上这行一定会出现，不能混进命令输出（否则会被当成扫描结果/文件内容）。
+    """
+    v = _line_value(line)
+    return v == f"echo {marker}" or v.endswith(f"echo {marker}")
+
+
+def _strip_echo(out: str, cmd: str, marker: str = "") -> str:
+    """去掉 PTY 回显的命令行、哨兵回显行、ANSI 控制序列与空行。"""
+    out = _ANSI_RE.sub("", out)
+    out = out.replace("\r\n", "\n").replace("\r", "")
+    lines = [l for l in out.split("\n")
+             if l.strip() and l.strip() != cmd.strip()
+             and not (marker and _is_marker_echo(l, marker))]
+    return "\n".join(lines)
+
+
 class ReverseShellListener:
     """一次监听：等待一个回连，成功后可取回通道。"""
 
@@ -289,12 +341,13 @@ class ReverseShellChannel(SessionBase):
             deadline = time.time() + max(1.0, timeout)
             while True:
                 chunk, eof = self._snapshot(start)
-                if marker in chunk:
-                    return ExecResult(ok=True, output=self._cut_sentinel(chunk, marker, cmd),
+                idx = marker_index(chunk, marker)
+                if idx >= 0:
+                    return ExecResult(ok=True, output=_strip_echo(chunk[:idx], cmd, marker),
                                       ms=int((time.perf_counter() - t0) * 1000))
                 if eof:
                     return ExecResult(ok=False, error="对端已关闭连接",
-                                      output=self._strip_echo(chunk, cmd),
+                                      output=_strip_echo(chunk, cmd, marker),
                                       ms=int((time.perf_counter() - t0) * 1000))
                 if time.time() >= deadline:
                     break
@@ -304,8 +357,9 @@ class ReverseShellChannel(SessionBase):
             self._interrupt()
             time.sleep(0.4)
             chunk, _ = self._snapshot(start)
-            out = (self._cut_sentinel(chunk, marker, cmd) if marker in chunk
-                   else self._strip_echo(chunk, cmd))
+            idx = marker_index(chunk, marker)
+            out = (_strip_echo(chunk[:idx], cmd, marker) if idx >= 0
+                   else _strip_echo(chunk, cmd, marker))
             return ExecResult(ok=False, output=out, timed_out=True,
                               error=f"命令超时（>{timeout}s），已向目标发送 Ctrl+C",
                               ms=int((time.perf_counter() - t0) * 1000))
@@ -345,13 +399,15 @@ class ReverseShellChannel(SessionBase):
                 while "\n" in new:
                     line, new = new.split("\n", 1)
                     consumed += len(line) + 1
-                    if marker in line:
+                    if marker_line(line, marker):
                         return done(True)
+                    if _is_marker_echo(line, marker):
+                        continue
                     line = self._clean_line(line)
                     if line.strip() and line.strip() != cmd.strip():
                         lines.append(line)
                         on_line(line)
-                if marker in new:  # 标记行没有换行结尾（罕见）
+                if marker_line(new, marker):  # 标记行没有换行结尾（罕见）
                     return done(True)
                 if eof:
                     return done(False, "对端已关闭连接")
@@ -371,20 +427,13 @@ class ReverseShellChannel(SessionBase):
 
     @staticmethod
     def _cut_sentinel(chunk: str, marker: str, cmd: str) -> str:
-        """截到哨兵标记之前，并丢掉标记所在行残留的「提示符 + echo 」回显。"""
-        idx = chunk.find(marker)
-        line_start = chunk.rfind("\n", 0, idx) + 1
-        tail = chunk[line_start:idx]
-        body = chunk[:line_start] if "echo " in tail else chunk[:idx]
-        return ReverseShellChannel._strip_echo(body, cmd)
+        """截到「独占一行的哨兵」之前（跳过 PTY 回显的 ``echo PH_x`` 行）。"""
+        idx = marker_index(chunk, marker)
+        return _strip_echo(chunk if idx < 0 else chunk[:idx], cmd, marker)
 
     @staticmethod
-    def _strip_echo(out: str, cmd: str) -> str:
-        """去掉 PTY 回显的命令行本身与 ANSI 控制序列。"""
-        out = _ANSI_RE.sub("", out)
-        out = out.replace("\r\n", "\n").replace("\r", "")
-        lines = [l for l in out.split("\n") if l.strip() and l.strip() != cmd.strip()]
-        return "\n".join(lines)
+    def _strip_echo(out: str, cmd: str, marker: str = "") -> str:
+        return _strip_echo(out, cmd, marker)
 
     def list_dir(self, path: str) -> list[FileEntry]:
         res = self.exec(f"ls -la --time-style=+%Y-%m-%d\\ %H:%M {path!r} 2>&1")

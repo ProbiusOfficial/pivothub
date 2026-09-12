@@ -98,6 +98,8 @@
         matrixRunning: false,     /* A4：回连端口矩阵探测中 */
         matrix: null,             /* A4：矩阵结果 */
         matrixPorts: '',          /* 自定义端口集（留空用后端默认） */
+        warning: '',              /* 探测结论与防火墙留档不一致等需人工复核的提示 */
+        rulesHint: '',            /* 目标侧防火墙留档放行项提示 */
         showTpl: false,
       });
 
@@ -170,7 +172,13 @@
             S.toast('该节点暂无可用 Shell，无法真实探测（可先登记 Shell 或切半自动档）', 'err');
             return;
           }
-          S.probeShell(shell.id, {}).then((out) => {
+          S.probeShell(shell.id, {
+            /* 探针目标 = 攻击机（回答「能不能回连到我」，而不是「能不能上公网」）。
+               只给 IP：端口由后端选「面板自己确定在监听」的那个（暂存 HTTP 服务），
+               避免拿一个没开监听的端口探测得出「TCP 全封」的假结论；
+               要测具体端口请用下面的「实测回连端口」矩阵。 */
+            attackIp: compose.attackIp || '',
+          }).then((out) => {
             detect.running = false;
             if (!out || !out.ok) {
               detect.done = false;
@@ -195,7 +203,12 @@
             detect.reason = out.reason || '';
             detect.templates = out.templates || [];
             detect.reachablePorts = out.reachablePorts || [];
-            if (!silent) S.toast('探测完成 · 推荐 ' + (out.recommend || '—'), 'ok');
+            detect.warning = out.warning || '';
+            detect.rulesHint = out.rulesHint || '';
+            if (!silent) {
+              S.toast('探测完成 · 推荐 ' + (out.recommend || '—'), 'ok');
+              if (out.warning) S.toast(out.warning, 'warn');
+            }
             recommendTool(detect.recommend);
             refreshCmds();
           });
@@ -218,14 +231,16 @@
       }
 
       function finishDetect(host, silent) {
+        /* 无后端（纯前端演示）时的本地推导分支：与后端 conclude() 同一套分档逻辑，
+           不再把 TCP/HTTP 混同（旧实现 `ok('TCP') || ok('HTTP')` 会推荐错工具）。 */
         detect.running = false;
         detect.done = true;
         const ok = (k) => { const p = detect.probes.find((x) => x.key === k); return p && p.state === 'ok'; };
-        if (ok('TCP') || ok('HTTP')) {
-          detect.verdict = '可反向 TCP / HTTP 出网';
+        if (ok('TCP')) {
+          detect.verdict = '可反向 TCP 出网';
           detect.recommend = 'chisel（反向，单文件易上传）';
           detect.alt = 'frp（反向 Socks5，链路更稳）';
-          detect.reason = 'TCP 与 HTTP 均可达：单跳用 chisel 一条命令搞定；需要长期稳定多级链时换 frp。';
+          detect.reason = '目标可出站任意 TCP 端口：单跳用 chisel 一条命令搞定；需要长期稳定多级链时换 frp。';
         } else if (ok('HTTP')) {
           detect.verdict = '仅 HTTP 出网';
           detect.recommend = 'Neo-reGeorg（HTTP 隧道）';
@@ -598,15 +613,20 @@
         return names[0] || 'chisel';
       }
 
+      /* 采纳推荐：只在推荐命中已接入工具时才切下拉。
+         推荐语是 DNS/ICMP 隧道等未接入项时必须保持用户当前选择不动——
+         旧实现回退到「第一个已启用工具」（meta 顺序是 frp 在前），会造成
+         「推荐 dnscat2/iodine，下拉却被切到 frp」的自相矛盾。 */
       function recommendTool(recommend) {
         const r = String(recommend || '');
         let want = '';
         if (/chisel/.test(r)) want = 'chisel';
         else if (/frp/.test(r)) want = 'frp';
-        else if (/Neo-reGeorg/.test(r)) want = 'Neo-reGeorg';
+        else if (/Neo-reGeorg/i.test(r)) want = 'Neo-reGeorg';
+        if (!want) return '';
         const actual = pickTool(want);
         compose.tool = actual;
-        if (want && actual !== want) {
+        if (actual !== want) {
           S.toast('探测推荐 ' + want + '（当前为下线状态），已回退到 ' + actual, 'warn');
         }
         return actual;
@@ -637,13 +657,17 @@
         });
       }
 
-      /* 采纳推荐：把工具/链路类型切到探测结论推荐的方案 */
+      /* 采纳推荐：把工具/链路类型切到探测结论推荐的方案（未接入的工具不硬切） */
       function applyRecommend() {
         const r = detect.recommend || '';
-        recommendTool(r);
+        const actual = recommendTool(r);
         if (/正向/.test(r)) compose.linkType = 'portfwd';
         refreshCmds();
         ui.modal = null;
+        if (!actual) {
+          S.toast('该推荐（' + (r || '—') + '）需外部工具编排，面板未切换隧道工具；可参考下方模板手动执行', 'warn');
+          return;
+        }
         S.toast('已按探测结论切换到 ' + compose.tool + ' / ' + compose.linkType, 'ok');
       }
 

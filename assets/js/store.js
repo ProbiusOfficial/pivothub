@@ -671,12 +671,16 @@
     const s = activeShell();
     const host = s ? hostsById[s.hostId] || {} : {};
     const cred = state.creds.find((c) => c.hostId === (host.id || '')) || {};
+    /* 攻击机地址/端口一律取自项目配置：旧实现把 $LHOST/$LPORT 硬编码替换成
+       文档占位地址 203.0.113.7:4444，面板里看到的命令与真实环境完全对不上。 */
+    const attackIp = (state.attack && state.attack.ip) || '127.0.0.1';
+    const attackPort = (state.attack && state.attack.port) || 4444;
     return String(cmd)
-      .replace(/\$LHOST/g, '203.0.113.7')
-      .replace(/\$LPORT/g, '4444')
-      .replace(/\$IP/g, host.ip || '10.10.20.5')
-      .replace(/\$TARGET/g, host.ip || '10.10.30.8')
-      .replace(/\$CRED/g, (cred.username || 'svc_web') + ' 凭据');
+      .replace(/\$LHOST/g, attackIp)
+      .replace(/\$LPORT/g, String(attackPort))
+      .replace(/\$IP/g, host.ip || attackIp)
+      .replace(/\$TARGET/g, host.ip || '')
+      .replace(/\$CRED/g, (cred.username || '') + (cred.username ? ' 凭据' : ''));
   }
 
   /* 固化技法执行：MS2 起服务端真实执行并依据回显判定 PTY */
@@ -1773,19 +1777,33 @@
     }, 350);
   }
 
-  /* 新建项目（用户显式入口）：后端创建干净工作区后自动切换过去 */
+  /* 新建项目（用户显式入口）：页内模态输入名称，不再用原生 window.prompt
+     （内嵌浏览器 / 自动化环境会吞掉原生弹窗，表现为「点了没反应」）。 */
+  const projectForm = reactive({ name: '', busy: false });
+
   function createProject() {
     if (!hasApi) { toast('后端不可用：请先启动 python -m pivothub', 'err'); return; }
-    const defName = '比赛 ' + new Date().toLocaleDateString('zh-CN');
-    const name = window.prompt('新项目名称（一场比赛 / 一个靶场）', defName);
-    if (!name || !name.trim()) return;
-    PivotAPI.post('/api/projects', { name: name.trim() })
+    projectForm.name = '比赛 ' + new Date().toLocaleDateString('zh-CN');
+    projectForm.busy = false;
+    state.ui.modal = 'project-add';
+  }
+
+  function submitProjectAdd() {
+    const name = String(projectForm.name || '').trim();
+    if (!name) { toast('请填写项目名称', 'err'); return; }
+    projectForm.busy = true;
+    PivotAPI.post('/api/projects', { name })
       .then((p) => {
         state.projects.push(p);
         state.projectId = p.id; /* 触发 watch → 整包刷新为空项目 */
+        projectForm.busy = false;
+        state.ui.modal = null;
         toast('已创建项目：' + p.name, 'ok');
       })
-      .catch(() => toast('创建失败：后端不可达', 'err'));
+      .catch((e) => {
+        projectForm.busy = false;
+        toast('创建失败：' + String((e && e.message) || e), 'err');
+      });
   }
 
   /* 删除项目（用户显式入口）：确认后级联删除服务端数据，并切到剩余第一个项目。
@@ -2114,6 +2132,7 @@
     buildMarkdown, init, toggleTimer, rid, sleep,
     saveNodePos, refreshState, isApiMode: () => apiMode,
     readFile, saveFileEdit, closeFileEdit, uploadFile, pickAndUpload, createProject, deleteProject,
+    projectForm, submitProjectAdd,
     uploadMode, setUploadMode, uploadModeText, detectPullTools,
   };
 })(window);

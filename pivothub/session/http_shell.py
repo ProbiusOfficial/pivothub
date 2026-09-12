@@ -69,6 +69,9 @@ ECHO_LANGS = ("jsp", "aspx", "asp", "python", "java", "cmdhttp")
 
 class HttpShellSession(SessionBase):
     kind = "http-shell"
+    #: 支持在目标侧拉起 PTY 后执行验证命令（pty_probe 已实现；此前漏置位导致
+    #: 终端固化面板对 WebShell 会话一律报「该会话驱动不支持 PTY 拉起」）
+    supports_pty_probe = True
 
     def __init__(
         self,

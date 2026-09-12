@@ -384,7 +384,7 @@ pytest **57 passed**（+4：链路登记 pid 校验/广播、lhost 选取、端�
 2. **真实 CTF 实战验证**（授权靶场训练题「④ 回声 · 遗忘的部署」）：
    - CVE-2017-12615 PUT 尾斜杠写 JSP 马（与 PivotHub JSP 驱动同协议）→ 面板登记真实存活（165ms）；
    - 面板虚拟终端真实执行：双网卡发现（172.32.0.10/172.33.0.10）、WEB-INF/db.properties 读出内网库
-     凭据 archive/REDACTED****（db01=172.33.0.20）、/etc/passwd 666 提权（openssl -1 hash 追加 UID=0
+     凭据 archive/REDACTED********（db01=172.33.0.20）、/etc/passwd 666 提权（openssl -1 hash 追加 UID=0
      用户 + script 转 pty 过 su）→ uid=0(root)；
    - 3 个 Flag 全部拿下并入库新项目 Flag 墙（应用层 / 提权后 / 内网库 secret_vault），战报笔记入时间线；
    - JDBC 查询马（复用 Tomcat 自带 mysql-connector）打通内网库，验证「配置弱口令→内网」训练点。

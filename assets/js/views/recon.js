@@ -21,6 +21,7 @@
     localScanner: '',
     scannerName: '', scannerB64: '', scannerSize: 0, forceUpload: false,
     remoteDir: '',                   /* 目标侧暂存目录（留空 = 默认 /tmp 或 %TEMP%） */
+    transfer: 'auto',                /* 扫描器传输：auto=HTTP 拉取优先回退分片 / http / chunk */
     probeTitles: true,
     template: '', extraArgs: '', timeoutS: 300,
     selected: {},                    /* ip -> bool */
@@ -233,6 +234,7 @@
           template: R.template,
           extraArgs: R.extraArgs,
           remoteDir: R.remoteDir,
+          transfer: R.transfer,
         }).then((out) => {
           if (!out || !out.ok) {
             S.toast('扫描未启动：' + ((out && out.error) || '未知原因'), 'err');
@@ -428,6 +430,7 @@
         ...toRefs(R),
         ui, live, logEl, shells, knownSet, selectedCount, allSelected, targetPlatform, localScanners,
         currentShell, isReverse, scanning, scanResult, liveLines, defaultRemoteDir,
+        transfer: toRefs(R).transfer,
         ipOf: S.ipOf, goto: S.goto, defaultTemplate: DEFAULT_TEMPLATE, icon: global.icon,
         portText, titleText,
         loadEnv, loadScanners, pickScanner, runScan, cancelScan, openTerminal, clearLog,

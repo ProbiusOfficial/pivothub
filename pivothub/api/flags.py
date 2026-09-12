@@ -23,9 +23,22 @@ router = APIRouter()
 
 @router.post("/flags", response_model=FlagOut)
 def add_flag(form: FlagIn, db: Session = Depends(get_db)):
+    """记录 Flag。所属主机必须存在且属于当前项目（否则 400，绝不写脏数据）。
+
+    背景：时间线事件的 host_id 有外键约束，陈旧/空 hostId 会让整笔提交以
+    IntegrityError 冒泡成 500；跨项目主机虽然能落库，但会让 Flag 归属错乱。
+    """
     project = get_project(db, form.projectId or DEFAULT_PROJECT_ID)
+    host_id = (form.hostId or "").strip()
+    if not host_id:
+        raise HTTPException(400, "请选择所属主机（记录 Flag 需要绑定当前项目的一台主机）")
+    host = db.get(Host, host_id)
+    if host is None:
+        raise HTTPException(400, f"所属主机不存在: {host_id}（可能已被删除，请重新选择）")
+    if host.project_id != project.id:
+        raise HTTPException(400, f"主机 {host_id} 不属于项目 {project.id}，请切换项目或改选该主机")
     f = Flag(
-        id=rid("f"), project_id=project.id, host_id=form.hostId, stage=form.stage,
+        id=rid("f"), project_id=project.id, host_id=host_id, stage=form.stage,
         value=form.value, submitted=form.submitted, note=form.note, created_at=now(),
     )
     db.add(f)

@@ -171,6 +171,37 @@
       </div>
     </div>
 
+    <!-- 新建项目：页内模态输入（原生 prompt 在内嵌 / 自动化浏览器里会被吞掉，表现成「点了没反应」） -->
+    <div class="modal-mask" v-if="ui.modal === 'project-add'" @click.self="ui.modal = null">
+      <div class="modal modal-narrow">
+        <div class="modal-head">
+          <h3>
+            <svg class="ico" viewBox="0 0 24 24" v-html="icon('plus')"></svg>
+            新建项目
+          </h3>
+          <button class="icon-btn" @click="ui.modal = null">×</button>
+        </div>
+        <div class="modal-body form-stack">
+          <label class="field">
+            <span>项目名称（一场比赛 / 一个靶场）</span>
+            <input class="input" v-model="projectForm.name" placeholder="如 ③深潜·三层内网"
+                   @keyup.enter="submitProjectAdd()" />
+          </label>
+          <p class="muted tiny">
+            新项目 = 干净工作区：只自动创建「攻击端本机」节点，其余资产 / 会话 / 链路 / 凭据 / Flag
+            全部从零开始。当前项目数据不受影响，可随时用顶栏下拉切回。
+          </p>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="ui.modal = null">取消</button>
+          <button class="btn btn-primary" :disabled="projectForm.busy || !projectForm.name.trim()"
+                  @click="submitProjectAdd()">
+            {{ projectForm.busy ? '创建中…' : '创建并切换' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 全局设置：攻击机网络（面板所在机器就是攻击机；反弹/回连命令的唯一地址来源） -->
     <div class="modal-mask" v-if="ui.modal === 'global-cfg'" @click.self="ui.modal = null">
       <div class="modal modal-narrow">
@@ -987,6 +1018,18 @@
           <label class="field field-full" v-if="scannerMode !== 'builtin'">
             <span>目标暂存目录（靶机权限受限时改成可写目录）</span>
             <input class="input mono" v-model="remoteDir" :placeholder="defaultRemoteDir" />
+          </label>
+          <label class="field field-full" v-if="scannerMode !== 'builtin'">
+            <span>扫描器传输方式</span>
+            <select class="input" v-model="transfer">
+              <option value="auto">自动（小于 512KB 直接分片；大文件 HTTP 拉取优先，失败回退分片）</option>
+              <option value="http">HTTP 拉取（目标机 curl/wget 自取，适合大二进制）</option>
+              <option value="chunk">分片直传（经会话 base64 逐块写入）</option>
+            </select>
+            <p class="muted tiny">
+              HTTP 拉取在攻击机起临时 HTTP 服务由目标机自取（与「文件管理 → HTTP 拉取」同一通道）：
+              大文件不必经 WebShell 分片，快且不易被单参数长度限制截断；目标不通攻击机时自动回退分片。
+            </p>
           </label>
           <p class="field-full muted tiny" v-if="scannerMode !== 'builtin' && remoteDir">
             扫描器将上传到 <code class="mono">{{ remoteDir }}</code>（留空则用默认 {{ defaultRemoteDir }}）
@@ -1832,6 +1875,10 @@
             <div class="res-line"><span>推荐隧道</span><b class="text-ok">{{ detect.recommend }}</b></div>
             <div class="res-line" v-if="detect.alt"><span>备选</span><b>{{ detect.alt }}</b></div>
             <p class="muted tiny">{{ detect.reason }}</p>
+            <div class="callout callout-err" v-if="detect.warning" style="margin-top:10px">
+              <b class="text-err">需要人工复核</b>
+              <p class="muted tiny">{{ detect.warning }}</p>
+            </div>
           </div>
           <div class="callout" v-else>
             <b>探测进行中…</b>
@@ -2869,7 +2916,7 @@
 </script>
 
 <script type="text/x-template" id="tpl-modal-layer">
-  <div class="modal-mask" v-if="ui.modal && !['shell-add','ssh-add','host-add','scan-import','cred-add','flag-add','flag-edit','stage-edit','note-add','tty-fix','attack-cfg','tools-cfg','global-cfg','probe'].includes(ui.modal)" @click.self="ui.modal = null">
+  <div class="modal-mask" v-if="ui.modal && !['shell-add','ssh-add','host-add','scan-import','cred-add','flag-add','flag-edit','stage-edit','note-add','tty-fix','attack-cfg','tools-cfg','global-cfg','project-add','probe'].includes(ui.modal)" @click.self="ui.modal = null">
     <div class="modal">
       <div class="modal-head">
         <h3>{{ modalTitle }}</h3>
