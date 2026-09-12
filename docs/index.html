@@ -23,24 +23,24 @@
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
-  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.75 var(--sans);
-       -webkit-font-smoothing:antialiased;overflow-x:hidden}
+  body{margin:0;background-color:var(--bg);color:var(--text);font:15px/1.75 var(--sans);
+       -webkit-font-smoothing:antialiased;overflow-x:hidden;
+       /* 装饰背景全部走 body 固定背景层：不用独立 fixed 定位 + 负 z-index 的元素，
+          那种写法在部分合成/截图路径下会把整层内容盖住（实测 IAB 截图全黑） */
+       background-image:
+         radial-gradient(circle at 50% 0,transparent 30%,rgba(5,10,14,.93) 88%),
+         radial-gradient(900px 480px at 12% -8%,rgba(0,229,160,.10),transparent 60%),
+         radial-gradient(760px 420px at 92% 4%,rgba(74,168,255,.08),transparent 60%),
+         linear-gradient(rgba(22,40,58,.34) 1px,transparent 1px),
+         linear-gradient(90deg,rgba(22,40,58,.34) 1px,transparent 1px);
+       background-size:auto,auto,auto,48px 48px,48px 48px;
+       background-repeat:no-repeat,no-repeat,no-repeat,repeat,repeat;
+       background-attachment:fixed,fixed,fixed,fixed,fixed}
   a{color:var(--accent);text-decoration:none}
   a:hover{text-decoration:underline}
   code,kbd,pre{font-family:var(--mono)}
   .wrap{max-width:var(--max);margin:0 auto;padding:0 22px}
   .mono{font-family:var(--mono)}
-
-  /* ---------- 背景网格 ---------- */
-  .grid-bg{position:fixed;inset:0;z-index:-1;pointer-events:none;
-    background:
-      radial-gradient(900px 480px at 12% -8%,rgba(0,229,160,.10),transparent 60%),
-      radial-gradient(760px 420px at 92% 4%,rgba(74,168,255,.08),transparent 60%),
-      linear-gradient(rgba(22,40,58,.34) 1px,transparent 1px) 0 0/48px 48px,
-      linear-gradient(90deg,rgba(22,40,58,.34) 1px,transparent 1px) 0 0/48px 48px,
-      var(--bg);}
-  .grid-bg::after{content:"";position:absolute;inset:0;
-    background:radial-gradient(circle at 50% 0,transparent 30%,var(--bg) 88%)}
 
   /* ---------- 顶栏 ---------- */
   header{position:sticky;top:0;z-index:50;backdrop-filter:blur(10px);
@@ -152,7 +152,6 @@
 </style>
 </head>
 <body>
-<div class="grid-bg"></div>
 
 <header>
   <div class="wrap nav">
